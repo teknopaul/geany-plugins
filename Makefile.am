@@ -95,6 +95,14 @@ if ENABLE_GENIUSPASTE
 SUBDIRS += geniuspaste
 endif
 
+if ENABLE_GEANYAGENT
+SUBDIRS += geanyagent
+endif
+
+if ENABLE_GEANYCLI
+SUBDIRS += geanycli
+endif
+
 if ENABLE_GITCHANGEBAR
 SUBDIRS += git-changebar
 endif

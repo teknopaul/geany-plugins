@@ -1244,8 +1244,67 @@ on_menu_close_children(GtkMenuItem *menuitem, gchar *uri)
 static void
 on_menu_copy_uri(GtkMenuItem *menuitem, gchar *uri)
 {
-	GtkClipboard *cb = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
-	gtk_clipboard_set_text(cb, uri, -1);
+	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), uri, -1);
+	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_PRIMARY), uri, -1);
+}
+
+static void
+on_menu_copy_relative_uri(GtkMenuItem *menuitem, gchar *uri)
+{
+	const gchar *root = addressbar_last_address;
+	const gchar *relative = uri;
+
+	if (root && g_str_has_prefix(uri, root))
+	{
+		relative = uri + strlen(root);
+		if (*relative == G_DIR_SEPARATOR)
+			relative++;
+	}
+	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), relative, -1);
+	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_PRIMARY), relative, -1);
+}
+
+static void
+on_menu_execute_in_terminal(GtkMenuItem *menuitem, gchar *uri)
+{
+	GType obj_type = G_OBJECT_TYPE(geany->object);
+
+	if (g_signal_lookup("geanyterminal-run-command", obj_type))
+	{
+		gchar *quoted = g_shell_quote(uri);
+		g_signal_emit_by_name(geany->object, "geanyterminal-run-command", quoted, TRUE);
+		g_free(quoted);
+		return;
+	}
+
+	/* Fallback: launch configured external terminal */
+	gchar *dir = g_path_get_dirname(uri);
+	gchar *quoted = g_shell_quote(uri);
+	gchar *cmd = g_strconcat(CONFIG_OPEN_TERMINAL, " -e ", quoted, NULL);
+	GError *error = NULL;
+
+	if (!spawn_async(dir, cmd, NULL, NULL, NULL, &error))
+	{
+		ui_set_statusbar(TRUE, _("Could not execute '%s' (%s)."), uri, error->message);
+		g_error_free(error);
+	}
+	g_free(quoted);
+	g_free(cmd);
+	g_free(dir);
+}
+
+static void
+on_menu_run_file(GtkMenuItem *menuitem, gchar *uri)
+{
+	gchar *dir = g_path_get_dirname(uri);
+	GError *error = NULL;
+
+	if (!spawn_async(dir, uri, NULL, NULL, NULL, &error))
+	{
+		ui_set_statusbar(TRUE, _("Could not run '%s' (%s)."), uri, error->message);
+		g_error_free(error);
+	}
+	g_free(dir);
 }
 
 static void
@@ -1278,6 +1337,7 @@ create_popup_menu(const gchar *name, const gchar *uri)
 	gboolean is_exists 		= g_file_test(uri, G_FILE_TEST_EXISTS);
 	gboolean is_dir 		= is_exists ? g_file_test(uri, G_FILE_TEST_IS_DIR) : FALSE;
 	gboolean is_document 	= document_find_by_filename(uri) != NULL ? TRUE : FALSE;
+	gboolean is_executable	= is_exists && !is_dir && g_file_test(uri, G_FILE_TEST_IS_EXECUTABLE);
 
 #if GTK_CHECK_VERSION(3, 10, 0)
 	item = ui_image_menu_item_new("go-up", _("Go _Up"));
@@ -1307,6 +1367,16 @@ create_popup_menu(const gchar *name, const gchar *uri)
 	item = ui_image_menu_item_new("utilities-terminal", _("Open _Terminal"));
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_open_terminal), g_strdup(uri), (GClosureNotify)g_free, 0);
+
+	item = ui_image_menu_item_new("utilities-terminal", _("Execute _cli"));
+	gtk_container_add(GTK_CONTAINER(menu), item);
+	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_execute_in_terminal), g_strdup(uri), (GClosureNotify)g_free, 0);
+	gtk_widget_set_sensitive(item, is_executable);
+
+	item = ui_image_menu_item_new("system-run", _("_Run"));
+	gtk_container_add(GTK_CONTAINER(menu), item);
+	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_run_file), g_strdup(uri), (GClosureNotify)g_free, 0);
+	gtk_widget_set_sensitive(item, is_executable);
 
 #if GTK_CHECK_VERSION(3, 10, 0)
 	item = ui_image_menu_item_new("go-top", _("Set as _Root"));
@@ -1399,6 +1469,15 @@ create_popup_menu(const gchar *name, const gchar *uri)
 #endif
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_uri), g_strdup(uri), (GClosureNotify)g_free, 0);
+	gtk_widget_set_sensitive(item, is_exists);
+
+#if GTK_CHECK_VERSION(3, 10, 0)
+	item = ui_image_menu_item_new("edit-copy", _("Copy _Relative Path to Clipboard"));
+#else
+	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("Copy _Relative Path to Clipboard"));
+#endif
+	gtk_container_add(GTK_CONTAINER(menu), item);
+	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_relative_uri), g_strdup(uri), (GClosureNotify)g_free, 0);
 	gtk_widget_set_sensitive(item, is_exists);
 
 	item = gtk_separator_menu_item_new();
