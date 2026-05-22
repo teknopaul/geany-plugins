@@ -74,6 +74,9 @@ static gint         outer_idx    = -1;    /* page index in the message notebook 
 static gint         tab_counter  = 0;     /* monotonically-increasing label counter */
 static gboolean     active       = FALSE; /* set FALSE during cleanup to stop restarts */
 
+static GKeyFile  *tools_config    = NULL; /* merged user + project filetypetools.conf */
+static GtkWidget *tools_menu_item = NULL; /* "File Tools" entry appended to Tools menu */
+
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -167,6 +170,48 @@ static void on_close_btn_clicked(G_GNUC_UNUSED GtkButton *btn, gpointer user_dat
 
 
 /* ------------------------------------------------------------------ */
+/* Right-click context menu                                            */
+
+static void on_copy_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+#if VTE_CHECK_VERSION(0, 50, 0)
+    vte_terminal_copy_clipboard_format(VTE_TERMINAL(user_data), VTE_FORMAT_TEXT);
+#else
+    vte_terminal_copy_clipboard(VTE_TERMINAL(user_data));
+#endif
+}
+
+static void on_paste_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+    vte_terminal_paste_clipboard(VTE_TERMINAL(user_data));
+}
+
+static gboolean on_vte_button_press(GtkWidget *widget,
+                                    GdkEventButton *event,
+                                    G_GNUC_UNUSED gpointer data)
+{
+    if (event->button != 3)
+        return FALSE;
+
+    VteTerminal *vte  = VTE_TERMINAL(widget);
+    GtkWidget   *menu = gtk_menu_new();
+
+    GtkWidget *copy_item = gtk_menu_item_new_with_label("Copy");
+    g_signal_connect(copy_item, "activate", G_CALLBACK(on_copy_activate), vte);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), copy_item);
+
+    GtkWidget *paste_item = gtk_menu_item_new_with_label("Paste");
+    g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
+
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
+
+    return TRUE;
+}
+
+
+/* ------------------------------------------------------------------ */
 /* Tab creation                                                        */
 
 static TermTab *create_tab(const gchar *cmd)
@@ -184,6 +229,8 @@ static TermTab *create_tab(const gchar *cmd)
 
     g_signal_connect(tab->vte, "child-exited",
                      G_CALLBACK(on_child_exited), tab);
+    g_signal_connect(vte_widget, "button-press-event",
+                     G_CALLBACK(on_vte_button_press), NULL);
 
     /* Scrollbar */
     GtkWidget *scrollbar = gtk_scrollbar_new(
@@ -297,6 +344,201 @@ static void on_new_tab_clicked(G_GNUC_UNUSED GtkButton *btn,
 
 
 /* ------------------------------------------------------------------ */
+/* File-type tools                                                     */
+
+#define TOOLS_CONFIG_FILENAME "filetypetools.conf"
+
+/* Load ~/.config/geany/filetypetools.conf, then overlay
+ * <project-root>/filetypetools.conf on top. */
+static void tools_config_load(void)
+{
+    if (tools_config)
+        g_key_file_free(tools_config);
+    tools_config = g_key_file_new();
+
+    gchar *user_path = g_build_filename(geany->app->configdir,
+                                         TOOLS_CONFIG_FILENAME, NULL);
+    g_key_file_load_from_file(tools_config, user_path, G_KEY_FILE_NONE, NULL);
+    g_free(user_path);
+
+    GeanyProject *proj = geany->app->project;
+    if (!proj || !proj->base_path)
+        return;
+
+    gchar *proj_path = g_build_filename(proj->base_path,
+                                         TOOLS_CONFIG_FILENAME, NULL);
+    GKeyFile *pkf = g_key_file_new();
+    if (g_key_file_load_from_file(pkf, proj_path, G_KEY_FILE_NONE, NULL)) {
+        gsize ng;
+        gchar **groups = g_key_file_get_groups(pkf, &ng);
+        for (gsize gi = 0; gi < ng; gi++) {
+            gsize nk;
+            gchar **keys = g_key_file_get_keys(pkf, groups[gi], &nk, NULL);
+            for (gsize ki = 0; ki < nk; ki++) {
+                gchar *val = g_key_file_get_string(pkf, groups[gi],
+                                                    keys[ki], NULL);
+                g_key_file_set_string(tools_config, groups[gi],
+                                      keys[ki], val);
+                g_free(val);
+            }
+            g_strfreev(keys);
+        }
+        g_strfreev(groups);
+    }
+    g_key_file_free(pkf);
+    g_free(proj_path);
+}
+
+/* Returns a pointer into filepath for the matching section key, e.g.
+ * ".c.snip" or ".snip", trying longest suffix first.
+ * Returns ".*" (literal) for the wildcard section, NULL for no match. */
+static const gchar *tools_find_section(const gchar *filepath)
+{
+    if (!tools_config || !filepath)
+        return NULL;
+
+    const gchar *base = strrchr(filepath, G_DIR_SEPARATOR);
+    base = base ? base + 1 : filepath;
+
+    /* Walk from first dot rightward — longest match first */
+    const gchar *dot = strchr(base, '.');
+    while (dot) {
+        if (g_key_file_has_group(tools_config, dot))
+            return dot;
+        dot = strchr(dot + 1, '.');
+    }
+    return g_key_file_has_group(tools_config, ".*") ? ".*" : NULL;
+}
+
+/* Expand %p %d %f %e %l in tmpl using filepath. Caller frees result. */
+static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
+{
+    GString *out  = g_string_sized_new(256);
+    gchar   *dir  = g_path_get_dirname(filepath);
+    gchar   *base = g_path_get_basename(filepath);
+    const gchar *first_dot = strchr(base, '.');
+    gchar   *stem = first_dot ? g_strndup(base, (gsize)(first_dot - base))
+                              : g_strdup(base);
+
+    gint line = 1;
+    GeanyDocument *doc = document_get_current();
+    if (doc && doc->file_name && strcmp(doc->file_name, filepath) == 0)
+        line = sci_get_current_line(doc->editor->sci) + 1;
+
+    for (const gchar *p = tmpl; *p; p++) {
+        if (*p != '%' || !*(p + 1)) {
+            g_string_append_c(out, *p);
+            continue;
+        }
+        p++;
+        switch (*p) {
+            case 'p': g_string_append(out, filepath);          break;
+            case 'd': g_string_append(out, dir);               break;
+            case 'f': g_string_append(out, base);              break;
+            case 'e': g_string_append(out, stem);              break;
+            case 'l': g_string_append_printf(out, "%d", line); break;
+            case '%': g_string_append_c(out, '%');             break;
+            default:
+                g_string_append_c(out, '%');
+                g_string_append_c(out, *p);
+        }
+    }
+
+    g_free(dir);
+    g_free(base);
+    g_free(stem);
+    return g_string_free(out, FALSE);
+}
+
+static void on_tool_item_activate(GtkMenuItem *item,
+                                   G_GNUC_UNUSED gpointer data)
+{
+    const gchar *cmd = g_object_get_data(G_OBJECT(item), "tool-cmd");
+    if (cmd)
+        do_run_command(cmd, FALSE);
+}
+
+/* Rebuild the "File Tools" submenu for the given filepath.
+ * Pass NULL to clear and disable the menu. */
+static void tools_menu_populate(const gchar *filepath)
+{
+    if (!tools_menu_item)
+        return;
+
+    /* Use GTK's own mechanism to detach and release the old submenu.
+     * gtk_widget_destroy() alone does not clear the menu item's pointer,
+     * which prevents the replacement submenu from appearing. */
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(tools_menu_item), NULL);
+
+    if (!filepath || !tools_config) {
+        gtk_widget_set_sensitive(tools_menu_item, FALSE);
+        return;
+    }
+
+    const gchar *section = tools_find_section(filepath);
+    if (!section) {
+        gtk_widget_set_sensitive(tools_menu_item, FALSE);
+        return;
+    }
+
+    GtkWidget *submenu = gtk_menu_new();
+    gboolean   any     = FALSE;
+
+    for (gint i = 0; ; i++) {
+        gchar *key  = g_strdup_printf("tool_%d", i);
+        gchar *tmpl = g_key_file_get_string(tools_config, section, key, NULL);
+        g_free(key);
+        if (!tmpl)
+            break;
+
+        gchar     *cmd = tools_format_cmd(tmpl, filepath);
+        GtkWidget *mi  = gtk_menu_item_new_with_label(tmpl);
+        gtk_widget_set_tooltip_text(mi, cmd);
+        g_object_set_data_full(G_OBJECT(mi), "tool-cmd", cmd, g_free);
+        g_signal_connect(mi, "activate",
+                         G_CALLBACK(on_tool_item_activate), NULL);
+        gtk_menu_shell_append(GTK_MENU_SHELL(submenu), mi);
+        gtk_widget_show(mi);
+        g_free(tmpl);
+        any = TRUE;
+    }
+
+    if (any) {
+        gtk_menu_item_set_submenu(GTK_MENU_ITEM(tools_menu_item), submenu);
+        gtk_widget_set_sensitive(tools_menu_item, TRUE);
+        gtk_widget_show(submenu);
+    } else {
+        gtk_widget_destroy(submenu);
+        gtk_widget_set_sensitive(tools_menu_item, FALSE);
+    }
+}
+
+static void on_doc_activate(G_GNUC_UNUSED GObject *obj,
+                             GeanyDocument *doc,
+                             G_GNUC_UNUSED gpointer data)
+{
+    tools_menu_populate(doc ? doc->file_name : NULL);
+}
+
+static void on_project_open(G_GNUC_UNUSED GObject *obj,
+                             G_GNUC_UNUSED GKeyFile *config,
+                             G_GNUC_UNUSED gpointer data)
+{
+    tools_config_load();
+    GeanyDocument *doc = document_get_current();
+    tools_menu_populate(doc ? doc->file_name : NULL);
+}
+
+static void on_project_close(G_GNUC_UNUSED GObject *obj,
+                              G_GNUC_UNUSED gpointer data)
+{
+    tools_config_load();
+    GeanyDocument *doc = document_get_current();
+    tools_menu_populate(doc ? doc->file_name : NULL);
+}
+
+
+/* ------------------------------------------------------------------ */
 /* Plugin lifecycle                                                    */
 
 static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
@@ -322,13 +564,31 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     outer_widget = GTK_WIDGET(term_nb);
     gtk_widget_show(outer_widget);
 
-    GtkWidget *tab_label = gtk_label_new("🗔 cli");
+    GtkWidget *tab_label = gtk_label_new("🗔 Cli");
     outer_idx = gtk_notebook_append_page(
         GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
         outer_widget, tab_label);
 
     /* First terminal tab */
     create_tab(NULL);
+
+    /* File-type tools menu */
+    tools_config_load();
+    tools_menu_item = gtk_menu_item_new_with_label("File Tools");
+    gtk_widget_show(tools_menu_item);
+    gtk_menu_shell_append(GTK_MENU_SHELL(geany_data->main_widgets->tools_menu),
+                          tools_menu_item);
+    GeanyDocument *cur = document_get_current();
+    tools_menu_populate(cur ? cur->file_name : NULL);
+
+    plugin_signal_connect(plugin, geany->object, "document-activate", FALSE,
+                          G_CALLBACK(on_doc_activate), NULL);
+    plugin_signal_connect(plugin, geany->object, "document-open", FALSE,
+                          G_CALLBACK(on_doc_activate), NULL);
+    plugin_signal_connect(plugin, geany->object, "project-open", FALSE,
+                          G_CALLBACK(on_project_open), NULL);
+    plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
+                          G_CALLBACK(on_project_close), NULL);
 
     /* Register the IPC signal on the Geany application object.
      * g_signal_lookup guards against duplicate registration on reload. */
@@ -379,6 +639,15 @@ static void gt_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
         outer_widget = NULL;
         term_nb      = NULL;
         outer_idx    = -1;
+    }
+
+    if (tools_menu_item) {
+        gtk_widget_destroy(tools_menu_item);
+        tools_menu_item = NULL;
+    }
+    if (tools_config) {
+        g_key_file_free(tools_config);
+        tools_config = NULL;
     }
 
     tab_counter = 0;

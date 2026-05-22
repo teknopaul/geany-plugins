@@ -114,6 +114,48 @@ static gboolean ga_spawn_idle(G_GNUC_UNUSED gpointer data)
 
 
 /* ------------------------------------------------------------------ */
+/* Right-click context menu                                            */
+
+static void on_copy_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+#if VTE_CHECK_VERSION(0, 50, 0)
+	vte_terminal_copy_clipboard_format(VTE_TERMINAL(user_data), VTE_FORMAT_TEXT);
+#else
+	vte_terminal_copy_clipboard(VTE_TERMINAL(user_data));
+#endif
+}
+
+static void on_paste_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+	vte_terminal_paste_clipboard(VTE_TERMINAL(user_data));
+}
+
+static gboolean on_vte_button_press(GtkWidget *widget,
+                                    GdkEventButton *event,
+                                    G_GNUC_UNUSED gpointer data)
+{
+	if (event->button != 3)
+		return FALSE;
+
+	VteTerminal *vte  = VTE_TERMINAL(widget);
+	GtkWidget   *menu = gtk_menu_new();
+
+	GtkWidget *copy_item = gtk_menu_item_new_with_label("Copy");
+	g_signal_connect(copy_item, "activate", G_CALLBACK(on_copy_activate), vte);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), copy_item);
+
+	GtkWidget *paste_item = gtk_menu_item_new_with_label("Paste");
+	g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
+
+	gtk_widget_show_all(menu);
+	gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
+
+	return TRUE;
+}
+
+
+/* ------------------------------------------------------------------ */
 /* Widget construction                                                 */
 
 static void create_agent_tab(void)
@@ -138,6 +180,8 @@ static void create_agent_tab(void)
 
 	g_signal_connect(agent_term, "child-exited",
 	                 G_CALLBACK(on_child_exited), NULL);
+	g_signal_connect(vte, "button-press-event",
+	                 G_CALLBACK(on_vte_button_press), NULL);
 
 	gtk_widget_show_all(agent_hbox);
 
