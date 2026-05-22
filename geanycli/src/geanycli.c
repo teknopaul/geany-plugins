@@ -56,6 +56,7 @@ GeanyData    *geany_data;
 typedef struct {
     VteTerminal *vte;
     GtkWidget   *hbox;   /* terminal + scrollbar; used as the notebook page */
+    GtkWidget   *label;  /* GtkLabel in the tab header, for renaming */
 } TermTab;
 
 /* Carries (tab, cmd) across the async spawn boundary */
@@ -186,14 +187,47 @@ static void on_paste_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_dat
     vte_terminal_paste_clipboard(VTE_TERMINAL(user_data));
 }
 
+static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+    TermTab *tab = user_data;
+    if (!tab || !tab->label)
+        return;
+
+    GtkWidget *dialog = gtk_dialog_new_with_buttons(
+        "Rename Tab",
+        GTK_WINDOW(geany_data->main_widgets->window),
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        "Cancel", GTK_RESPONSE_CANCEL,
+        "Rename", GTK_RESPONSE_ACCEPT,
+        NULL);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry),
+                       gtk_label_get_text(GTK_LABEL(tab->label)));
+    gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+
+    GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_container_add(GTK_CONTAINER(content), entry);
+    gtk_widget_show_all(content);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        const gchar *text = gtk_entry_get_text(GTK_ENTRY(entry));
+        if (text && *text)
+            gtk_label_set_text(GTK_LABEL(tab->label), text);
+    }
+    gtk_widget_destroy(dialog);
+}
+
 static gboolean on_vte_button_press(GtkWidget *widget,
                                     GdkEventButton *event,
-                                    G_GNUC_UNUSED gpointer data)
+                                    gpointer data)
 {
     if (event->button != 3)
         return FALSE;
 
     VteTerminal *vte  = VTE_TERMINAL(widget);
+    TermTab     *tab  = data;
     GtkWidget   *menu = gtk_menu_new();
 
     GtkWidget *copy_item = gtk_menu_item_new_with_label("Copy");
@@ -203,6 +237,10 @@ static gboolean on_vte_button_press(GtkWidget *widget,
     GtkWidget *paste_item = gtk_menu_item_new_with_label("Paste");
     g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
+
+    GtkWidget *rename_item = gtk_menu_item_new_with_label("Rename tab\xe2\x80\xa6");
+    g_signal_connect(rename_item, "activate", G_CALLBACK(on_rename_tab_activate), tab);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), rename_item);
 
     gtk_widget_show_all(menu);
     gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
@@ -230,7 +268,7 @@ static TermTab *create_tab(const gchar *cmd)
     g_signal_connect(tab->vte, "child-exited",
                      G_CALLBACK(on_child_exited), tab);
     g_signal_connect(vte_widget, "button-press-event",
-                     G_CALLBACK(on_vte_button_press), NULL);
+                     G_CALLBACK(on_vte_button_press), tab);
 
     /* Scrollbar */
     GtkWidget *scrollbar = gtk_scrollbar_new(
@@ -253,6 +291,7 @@ static TermTab *create_tab(const gchar *cmd)
 
     GtkWidget *lbl_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     GtkWidget *label    = gtk_label_new(title);
+    tab->label = label;
     GtkWidget *close_btn = gtk_button_new();
     GtkWidget *close_img = gtk_image_new_from_icon_name("window-close-symbolic",
                                                           GTK_ICON_SIZE_MENU);

@@ -14,6 +14,7 @@
 #endif
 
 #include <string.h>
+#include <unistd.h>
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <vte/vte.h>
@@ -28,6 +29,7 @@ GeanyData    *geany_data;
 
 static VteTerminal *agent_term  = NULL;
 static GtkWidget   *agent_hbox  = NULL;
+static GtkWidget   *agent_label = NULL;
 static gint         tab_index   = -1;
 static gboolean     running     = FALSE;  /* FALSE during cleanup to suppress restart */
 
@@ -130,6 +132,77 @@ static void on_paste_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_dat
 	vte_terminal_paste_clipboard(VTE_TERMINAL(user_data));
 }
 
+typedef struct { VteTerminal *vte; gchar *text; } ClipCtxData;
+
+static void on_clip_ctx_data_free(gpointer data, G_GNUC_UNUSED GClosure *closure)
+{
+	ClipCtxData *ctx = (ClipCtxData *)data;
+	g_free(ctx->text);
+	g_free(ctx);
+}
+
+static void on_add_to_context_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+	ClipCtxData *ctx     = (ClipCtxData *)user_data;
+	gchar       *payload = g_strconcat("@", ctx->text, NULL);
+	gsize        len     = strlen(payload);
+
+#if VTE_CHECK_VERSION(0, 70, 0)
+	VtePty *pty = vte_terminal_get_pty(ctx->vte);
+	if (pty)
+		write(vte_pty_get_fd(pty), payload, len);
+#else
+	vte_terminal_feed_child(ctx->vte, payload, (gssize)len);
+#endif
+	g_free(payload);
+}
+
+/* Returns TRUE if text looks like a file-path argument suitable for @ context. */
+static gboolean clip_looks_like_context_ref(const gchar *text)
+{
+	if (!text || !*text)
+		return FALSE;
+	if (text[0] == '/')
+		return TRUE;
+	/* single line, no spaces, under 255 chars */
+	gsize len = strlen(text);
+	return len < 255 && !strchr(text, ' ') && !strchr(text, '\n');
+}
+
+static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item,
+                                   G_GNUC_UNUSED gpointer data)
+{
+	if (!agent_label)
+		return;
+
+	GtkWidget *dialog = gtk_dialog_new_with_buttons(
+	    "Rename Tab",
+	    GTK_WINDOW(geany_data->main_widgets->window),
+	    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+	    "_Cancel", GTK_RESPONSE_CANCEL,
+	    "_OK",     GTK_RESPONSE_OK,
+	    NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+
+	GtkWidget *entry = gtk_entry_new();
+	gtk_entry_set_text(GTK_ENTRY(entry), gtk_label_get_text(GTK_LABEL(agent_label)));
+	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+
+	GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	gtk_container_set_border_width(GTK_CONTAINER(content), 8);
+	gtk_box_pack_start(GTK_BOX(content), gtk_label_new("Tab title:"), FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content), entry, FALSE, FALSE, 2);
+	gtk_widget_show_all(dialog);
+
+	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
+	{
+		const gchar *new_title = gtk_entry_get_text(GTK_ENTRY(entry));
+		if (new_title && *new_title)
+			gtk_label_set_text(GTK_LABEL(agent_label), new_title);
+	}
+	gtk_widget_destroy(dialog);
+}
+
 static gboolean on_vte_button_press(GtkWidget *widget,
                                     GdkEventButton *event,
                                     G_GNUC_UNUSED gpointer data)
@@ -147,6 +220,35 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 	GtkWidget *paste_item = gtk_menu_item_new_with_label("Paste");
 	g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
+
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+	GtkWidget *rename_item = gtk_menu_item_new_with_label("Rename Tab");
+	g_signal_connect(rename_item, "activate", G_CALLBACK(on_rename_tab_activate), NULL);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), rename_item);
+
+	GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+	gchar        *clip_text = gtk_clipboard_wait_for_text(clipboard);
+	if (clip_text)
+	{
+		g_strstrip(clip_text);
+		if (clip_looks_like_context_ref(clip_text))
+		{
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu),
+			                      gtk_separator_menu_item_new());
+
+			ClipCtxData *ctx = g_new(ClipCtxData, 1);
+			ctx->vte  = vte;
+			ctx->text = g_strdup(clip_text);
+
+			GtkWidget *ctx_item = gtk_menu_item_new_with_label("Add to Context");
+			g_signal_connect_data(ctx_item, "activate",
+			                      G_CALLBACK(on_add_to_context_activate),
+			                      ctx, on_clip_ctx_data_free, 0);
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), ctx_item);
+		}
+		g_free(clip_text);
+	}
 
 	gtk_widget_show_all(menu);
 	gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
@@ -187,6 +289,7 @@ static void create_agent_tab(void)
 
 	/* 🤖 Agent — UTF-8 encoded inline */
 	label = gtk_label_new("\xf0\x9f\xa4\x96 Agent");
+	agent_label = label;
 	tab_index = gtk_notebook_append_page(
 	    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
 	    agent_hbox, label);
@@ -309,8 +412,9 @@ static void ga_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
 		gtk_notebook_remove_page(
 		    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
 		    tab_index);
-		agent_hbox = NULL;
-		tab_index  = -1;
+		agent_hbox  = NULL;
+		agent_label = NULL;
+		tab_index   = -1;
 	}
 
 	g_free(agent_cmd);

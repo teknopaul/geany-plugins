@@ -28,15 +28,12 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=7
-FILE_NAME_0=1069;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2FREADME;0;4
-FILE_NAME_1=0;Javascript;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.js;0;4
-FILE_NAME_2=0;Conf;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2F.config%2Fgeany%2Ffiletypetools.conf;0;4
-FILE_NAME_3=0;C++;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2Fgeanycli.h;0;4
-FILE_NAME_4=6092;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2Fgeanycli.c;0;4
-FILE_NAME_5=94;JSON;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.json;0;4
-FILE_NAME_6=0;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2Fgeanycli.la;0;4
-FILE_NAME_7=4026;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyagent%2Fsrc%2Fgeanyagent.c;0;4
+current_page=4
+FILE_NAME_0=29;Javascript;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.js;0;4
+FILE_NAME_1=0;JSON;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.json;0;4
+FILE_NAME_2=0;Sh;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.sh;0;4
+FILE_NAME_3=0;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2Fgeanycli.c;0;4
+FILE_NAME_4=0;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyagent%2Fsrc%2Fgeanyagent.c;0;4
 
 [VTE]
 last_dir=/home/teknopaul
