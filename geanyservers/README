@@ -1,0 +1,53 @@
+Geany Servers Plugin
+====================
+
+Adds a "Servers" tab to the Geany message window for managing local and
+systemd-managed services.
+
+Reads servertools.conf (INI format), displays one row per configured server
+with live status and ping indicators, and provides start/stop/reload/ping/log
+actions — all without blocking the UI thread.
+
+Configuration
+-------------
+
+Place servertools.conf in ~/.config/geany/servertools.conf (user defaults)
+and/or <project>/config/geany/servertools.conf (project overrides).
+
+Example:
+
+  [servers]
+  server_0=🕋 nginx
+  name_0=nginx
+  type_0=systemd
+  changes_0=reload src/www;src/cgi
+
+  server_1=🧱 firewall
+  name_1=ufw
+  type_1=systemd
+
+Keys per server (N = index):
+  server_N  — display label (emoji + name); empty string hides the row
+  name_N    — service name (used with systemctl)
+  type_N    — systemd (default), system, or local
+  start_N   — custom start command (default: systemctl start <name>)
+  stop_N    — custom stop command
+  reload_N  — custom reload command
+  status_N  — custom status script; exit 0 = running
+  ping_N    — command to ping the service
+  log_N     — path to log file (enables Logs button)
+  sudo_N    — prefix to prepend for privilege escalation
+  changes_N — "method path1;path2" — watch paths and run method on change
+  on_open_N — action to fire when a Geany project is opened (start/stop/reload)
+  on_close_N— action to fire when a Geany project is closed
+
+Requirements
+------------
+
+  * Geany 2.1+
+  * GTK 3
+
+License
+-------
+
+GPL-2.0-or-later

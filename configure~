@@ -747,6 +747,8 @@ ENABLE_GITCHANGEBAR_FALSE
 ENABLE_GITCHANGEBAR_TRUE
 GITCHANGEBAR_LIBS
 GITCHANGEBAR_CFLAGS
+ENABLE_GEANYSERVERS_FALSE
+ENABLE_GEANYSERVERS_TRUE
 ENABLE_GEANYCLI_FALSE
 ENABLE_GEANYCLI_TRUE
 ENABLE_GEANYAGENT_FALSE
@@ -1031,6 +1033,7 @@ enable_largefile
 enable_geniuspaste
 enable_geanyagent
 enable_geanycli
+enable_geanyservers
 enable_gitchangebar
 enable_keyrecord
 enable_lineoperations
@@ -1798,6 +1801,7 @@ Optional Features:
   --disable-geniuspaste   Do not build the GeniusPaste plugin
   --disable-geanyagent    Do not build the Geanyagent plugin
   --disable-geanycli      Do not build the Geanycli plugin
+  --disable-geanyservers  Do not build the Geanyservers plugin
   --disable-gitchangebar  Do not build the GitChangeBar plugin
   --disable-keyrecord     Do not build the Keyrecord plugin
   --disable-lineoperations
@@ -21598,6 +21602,48 @@ fi
 
 
 
+    # Check whether --enable-geanyservers was given.
+if test ${enable_geanyservers+y}
+then :
+  enableval=$enable_geanyservers; enable_geanyservers=$enableval
+else $as_nop
+  case $gp_enable_all in #(
+  no) :
+    enable_geanyservers=no ;; #(
+  yes) :
+    enable_geanyservers=yes ;; #(
+  *) :
+    enable_geanyservers=auto ;;
+esac
+fi
+
+
+
+
+        if test "$enable_geanyservers" = "auto"; then
+        enable_geanyservers=yes
+    fi
+     if test "$enable_geanyservers" = yes; then
+  ENABLE_GEANYSERVERS_TRUE=
+  ENABLE_GEANYSERVERS_FALSE='#'
+else
+  ENABLE_GEANYSERVERS_TRUE='#'
+  ENABLE_GEANYSERVERS_FALSE=
+fi
+
+
+    plugins_statusmsg="${plugins_statusmsg}Geanyservers:$enable_geanyservers
+"
+
+
+
+    ac_config_files="$ac_config_files geanyservers/Makefile geanyservers/src/Makefile"
+
+
+
+
+
+
     # Check whether --enable-gitchangebar was given.
 if test ${enable_gitchangebar+y}
 then :
@@ -25823,6 +25869,10 @@ if test -z "${ENABLE_GEANYCLI_TRUE}" && test -z "${ENABLE_GEANYCLI_FALSE}"; then
   as_fn_error $? "conditional \"ENABLE_GEANYCLI\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
+if test -z "${ENABLE_GEANYSERVERS_TRUE}" && test -z "${ENABLE_GEANYSERVERS_FALSE}"; then
+  as_fn_error $? "conditional \"ENABLE_GEANYSERVERS\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
 if test -z "${ENABLE_GITCHANGEBAR_TRUE}" && test -z "${ENABLE_GITCHANGEBAR_FALSE}"; then
   as_fn_error $? "conditional \"ENABLE_GITCHANGEBAR\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
@@ -26879,6 +26929,8 @@ do
     "geanyagent/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyagent/src/Makefile" ;;
     "geanycli/Makefile") CONFIG_FILES="$CONFIG_FILES geanycli/Makefile" ;;
     "geanycli/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanycli/src/Makefile" ;;
+    "geanyservers/Makefile") CONFIG_FILES="$CONFIG_FILES geanyservers/Makefile" ;;
+    "geanyservers/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyservers/src/Makefile" ;;
     "git-changebar/Makefile") CONFIG_FILES="$CONFIG_FILES git-changebar/Makefile" ;;
     "git-changebar/data/Makefile") CONFIG_FILES="$CONFIG_FILES git-changebar/data/Makefile" ;;
     "git-changebar/src/Makefile") CONFIG_FILES="$CONFIG_FILES git-changebar/src/Makefile" ;;

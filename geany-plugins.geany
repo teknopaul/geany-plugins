@@ -28,15 +28,17 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=7
+current_page=8
 FILE_NAME_0=26;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyagent%2Fsrc%2Fskill-md.template;0;4
 FILE_NAME_1=13339;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2Fgeanycli.c;0;4
-FILE_NAME_2=316;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeanycli.prompt.md;0;4
+FILE_NAME_2=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeanycli.prompt.md;0;4
 FILE_NAME_3=4628;Make;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2FMakefile;0;4
 FILE_NAME_4=4566;Make;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2FMakefile.in;0;4
 FILE_NAME_5=3018;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-output%2Fai.log;0;4
 FILE_NAME_6=36718;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Ftreebrowser%2Fsrc%2Ftreebrowser.c;0;4
-FILE_NAME_7=1672;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fcompiler_output.prompt.md;0;4
+FILE_NAME_7=1641;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fcompiler_output.prompt.md;0;4
+FILE_NAME_8=733;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fservers.prompt.md;0;4
+FILE_NAME_9=7675;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fservers.plan.md;0;4
 
 [VTE]
 last_dir=/home/teknopaul

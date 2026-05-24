@@ -103,6 +103,10 @@ if ENABLE_GEANYCLI
 SUBDIRS += geanycli
 endif
 
+if ENABLE_GEANYSERVERS
+SUBDIRS += geanyservers
+endif
+
 if ENABLE_GITCHANGEBAR
 SUBDIRS += git-changebar
 endif
