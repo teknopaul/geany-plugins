@@ -1,7 +1,7 @@
 /*
  * geanycli.c — Geany plugin: tabbed terminals in the message window
  *
- * Adds a "Terminal" tab to the message window.  Inside that tab a second
+ * Adds a "Cli" tab to the message window.  Inside that tab a second
  * GtkNotebook holds multiple VTE terminal instances.  Each terminal opens
  * a login shell at the current project root (or $HOME when no project is
  * open).  If the shell exits it is automatically restarted.
@@ -467,6 +467,8 @@ static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
     if (doc && doc->file_name && strcmp(doc->file_name, filepath) == 0)
         line = sci_get_current_line(doc->editor->sci) + 1;
 
+    gchar *root = get_work_dir();
+
     for (const gchar *p = tmpl; *p; p++) {
         if (*p != '%' || !*(p + 1)) {
             g_string_append_c(out, *p);
@@ -479,6 +481,7 @@ static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
             case 'f': g_string_append(out, base);              break;
             case 'e': g_string_append(out, stem);              break;
             case 'l': g_string_append_printf(out, "%d", line); break;
+            case 'r': g_string_append(out, root);              break;
             case '%': g_string_append_c(out, '%');             break;
             default:
                 g_string_append_c(out, '%');
@@ -486,6 +489,7 @@ static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
         }
     }
 
+    g_free(root);
     g_free(dir);
     g_free(base);
     g_free(stem);

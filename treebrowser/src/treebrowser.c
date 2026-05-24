@@ -37,6 +37,7 @@ static GtkWidget 			*sidebar_vbox;
 static GtkWidget 			*sidebar_vbox_bars;
 static GtkWidget 			*filter;
 static GtkWidget 			*addressbar;
+static GtkWidget 			*toolbar_tools_button;
 static gchar 				*addressbar_last_address 	= NULL;
 
 static GtkTreeIter 			bookmarks_iter;
@@ -1760,6 +1761,36 @@ on_button_hide_bars(void)
 }
 
 static void
+on_toolbar_tools_show_menu(GtkMenuToolButton *button, gpointer user_data)
+{
+	GtkWidget *menu     = gtk_menu_new();
+	GType      obj_type = G_OBJECT_TYPE(geany->object);
+	gboolean   has_tools = FALSE;
+
+	if (addressbar_last_address && g_signal_lookup("geanycli-append-tools", obj_type))
+	{
+		g_signal_emit_by_name(geany->object, "geanycli-append-tools",
+		                      addressbar_last_address, TRUE, (gpointer)menu);
+		GList *children = gtk_container_get_children(GTK_CONTAINER(menu));
+		if (children)
+		{
+			has_tools = TRUE;
+			g_list_free(children);
+		}
+	}
+
+	if (!has_tools)
+	{
+		GtkWidget *item = gtk_menu_item_new_with_label(_("No tools configured for this directory"));
+		gtk_widget_set_sensitive(item, FALSE);
+		gtk_container_add(GTK_CONTAINER(menu), item);
+	}
+
+	gtk_widget_show_all(menu);
+	gtk_menu_tool_button_set_menu(button, menu);
+}
+
+static void
 on_addressbar_activate(GtkEntry *entry, gpointer user_data)
 {
 	gchar *directory = gtk_editable_get_chars(GTK_EDITABLE(entry), 0, -1);
@@ -2219,6 +2250,20 @@ create_sidebar(void)
 	gtk_widget_set_tooltip_text(wid, _("Track path"));
 	g_signal_connect(wid, "clicked", G_CALLBACK(treebrowser_track_current), NULL);
 	gtk_container_add(GTK_CONTAINER(toolbar), wid);
+
+{
+#if GTK_CHECK_VERSION(3, 10, 0)
+		GtkWidget *img = gtk_image_new_from_icon_name("system-run", GTK_ICON_SIZE_SMALL_TOOLBAR);
+		toolbar_tools_button = GTK_WIDGET(gtk_menu_tool_button_new(img, NULL));
+#else
+		toolbar_tools_button = GTK_WIDGET(gtk_menu_tool_button_new_from_stock(GTK_STOCK_EXECUTE));
+#endif
+		gtk_widget_set_tooltip_text(toolbar_tools_button, _("Project file tools for current root"));
+		gtk_menu_tool_button_set_menu(GTK_MENU_TOOL_BUTTON(toolbar_tools_button), gtk_menu_new());
+		g_signal_connect(toolbar_tools_button, "show-menu",
+		                 G_CALLBACK(on_toolbar_tools_show_menu), NULL);
+		gtk_container_add(GTK_CONTAINER(toolbar), toolbar_tools_button);
+	}
 
 #if GTK_CHECK_VERSION(3, 10, 0)
 	wid = gtk_image_new_from_icon_name("window-close", GTK_ICON_SIZE_SMALL_TOOLBAR);

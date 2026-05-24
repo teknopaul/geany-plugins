@@ -15,7 +15,9 @@
 
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <gtk/gtk.h>
 #include <vte/vte.h>
 
@@ -36,7 +38,121 @@ static gboolean     running     = FALSE;  /* FALSE during cleanup to suppress re
 static gchar *agent_cmd    = NULL;
 static gchar *config_file  = NULL;
 
+/* askpass: temp dir prepended to PATH containing a sudo wrapper + askpass script */
+static gboolean use_askpass = FALSE;  /* opt-in; disabled by default */
+static gchar   *askpass_dir  = NULL;
+static gchar   *askpass_prog = NULL;
+
 #define DEFAULT_CMD "claude"
+
+static const gchar SKILL_TEMPLATE[] =
+    "---\n"
+    "name: %s\n"
+    "description: \n"
+    "---\n"
+    "\n"
+    "<objective>\n"
+    "\n"
+    "</objective>\n"
+    "\n"
+    "<process>\n"
+    "\n"
+    "</process>\n";
+
+
+/* ------------------------------------------------------------------ */
+/* Askpass setup                                                       */
+/*
+ * Creates a private temp dir (0700) prepended to PATH containing:
+ *   sudo             — wrapper that forces -A so sudo never prompts on the
+ *                      terminal; the AI agent cannot see or handle the password
+ *   geanyagent-askpass — zenity dialog (or delegates to a system askpass)
+ *
+ * sudo reads SUDO_ASKPASS and calls the helper; the helper shows a GTK
+ * password dialog and writes the password to stdout.  Nothing is logged.
+ */
+
+static void setup_askpass(void)
+{
+    /* Find a system askpass program */
+    const gchar *candidates[] = {
+        "/usr/lib/ssh/x11-ssh-askpass",
+        "/usr/libexec/ssh-askpass",
+        "/usr/lib/openssh/gnome-ssh-askpass",
+        "/usr/lib/openssh/x11-ssh-askpass",
+        "/usr/bin/ksshaskpass",
+        "/usr/bin/seahorse-askpass",
+        NULL
+    };
+    for (gint i = 0; candidates[i]; i++)
+    {
+        if (g_file_test(candidates[i], G_FILE_TEST_IS_EXECUTABLE))
+        {
+            askpass_prog = g_strdup(candidates[i]);
+            break;
+        }
+    }
+
+    /* No system askpass — try to build a zenity-based one */
+    if (!askpass_prog)
+    {
+        gchar *zenity = g_find_program_in_path("zenity");
+        if (!zenity)
+            return; /* nothing we can do */
+        g_free(zenity);
+    }
+
+    /* Private temp dir — mode 0700 so other users cannot replace scripts */
+    gchar *tmpl = g_build_filename(g_get_tmp_dir(), "geanyagent-XXXXXX", NULL);
+    askpass_dir = g_mkdtemp(tmpl);  /* modifies tmpl in-place on success */
+    if (!askpass_dir)
+    {
+        g_free(tmpl);
+        g_free(askpass_prog);
+        askpass_prog = NULL;
+        return;
+    }
+
+    /* Write zenity askpass helper if no system one was found */
+    if (!askpass_prog)
+    {
+        askpass_prog = g_build_filename(askpass_dir, "geanyagent-askpass", NULL);
+        const gchar *script =
+            "#!/bin/sh\n"
+            "zenity --password --title 'Agent needs sudo' -- \"${1:-Password:}\" 2>/dev/null\n";
+        utils_write_file(askpass_prog, script);
+        chmod(askpass_prog, S_IRWXU);
+    }
+
+    /* Write sudo wrapper: forces -A so sudo never prompts on the PTY.
+     * The AI sees only the exit code, never the password. */
+    gchar *sudo_path = g_build_filename(askpass_dir, "sudo", NULL);
+    gchar *content   = g_strdup_printf(
+        "#!/bin/sh\n"
+        "SUDO_ASKPASS='%s' exec /usr/bin/sudo -A \"$@\"\n",
+        askpass_prog);
+    utils_write_file(sudo_path, content);
+    g_free(content);
+    chmod(sudo_path, S_IRWXU);
+    g_free(sudo_path);
+}
+
+static void cleanup_askpass(void)
+{
+    if (askpass_dir)
+    {
+        gchar *p;
+        p = g_build_filename(askpass_dir, "sudo", NULL);
+        g_unlink(p); g_free(p);
+        p = g_build_filename(askpass_dir, "geanyagent-askpass", NULL);
+        g_unlink(p); g_free(p);
+        g_rmdir(askpass_dir);
+        g_free(askpass_dir);
+        askpass_dir = NULL;
+    }
+    g_free(askpass_prog);
+    askpass_prog = NULL;
+}
 
 
 /* ------------------------------------------------------------------ */
@@ -86,9 +202,27 @@ static void ga_spawn(void)
 	else
 		work_dir = g_strdup(g_get_home_dir());
 
-	/* strip vars that confuse nested terminals */
-	const gchar *exclude[] = { "COLUMNS", "LINES", "TERM", "TERM_PROGRAM", NULL };
-	gchar **env = utils_copy_environment(exclude, "TERM", "xterm-256color", NULL);
+	/* Build PATH: prepend askpass_dir so our sudo wrapper takes priority */
+	const gchar *old_path = g_getenv("PATH");
+	gchar *new_path = askpass_dir
+	    ? g_strconcat(askpass_dir, ":", old_path ? old_path : "/usr/bin:/bin", NULL)
+	    : g_strdup(old_path ? old_path : "/usr/bin:/bin");
+
+	/* strip vars that confuse nested terminals; rebuild PATH explicitly */
+	const gchar *exclude[] = { "COLUMNS", "LINES", "TERM", "TERM_PROGRAM", "PATH", NULL };
+	gchar **env;
+	if (askpass_prog)
+		env = utils_copy_environment(exclude,
+		                             "TERM",         "xterm-256color",
+		                             "PATH",         new_path,
+		                             "SUDO_ASKPASS", askpass_prog,
+		                             NULL);
+	else
+		env = utils_copy_environment(exclude,
+		                             "TERM", "xterm-256color",
+		                             "PATH", new_path,
+		                             NULL);
+	g_free(new_path);
 
 	vte_terminal_spawn_async(agent_term,
 	                         VTE_PTY_DEFAULT,
@@ -203,6 +337,71 @@ static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item,
 	gtk_widget_destroy(dialog);
 }
 
+static void on_new_skill_activate(G_GNUC_UNUSED GtkMenuItem *item,
+                                  G_GNUC_UNUSED gpointer data)
+{
+	GtkWidget *dialog = gtk_dialog_new_with_buttons(
+	    "New Skill",
+	    GTK_WINDOW(geany_data->main_widgets->window),
+	    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+	    "_Cancel", GTK_RESPONSE_CANCEL,
+	    "_OK",     GTK_RESPONSE_OK,
+	    NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+
+	GtkWidget *entry = gtk_entry_new();
+	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "my-skill");
+
+	GtkWidget *err_label = gtk_label_new("");
+
+	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	gtk_container_set_border_width(GTK_CONTAINER(content_area), 8);
+	gtk_box_pack_start(GTK_BOX(content_area), gtk_label_new("Skill name (no spaces):"), FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content_area), entry, FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content_area), err_label, FALSE, FALSE, 2);
+	gtk_widget_show_all(dialog);
+
+	while (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
+	{
+		const gchar *name = gtk_entry_get_text(GTK_ENTRY(entry));
+		if (!name || !*name)
+		{
+			gtk_label_set_text(GTK_LABEL(err_label), "Name cannot be empty.");
+			continue;
+		}
+		if (strchr(name, ' '))
+		{
+			gtk_label_set_text(GTK_LABEL(err_label), "Name cannot contain spaces.");
+			continue;
+		}
+
+		gchar *base_path;
+		GeanyApp *app = geany->app;
+		if (app->project && app->project->base_path && *app->project->base_path)
+			base_path = g_strdup(app->project->base_path);
+		else
+			base_path = g_strdup(g_get_home_dir());
+
+		gchar *skill_dir  = g_build_filename(base_path, ".claude", "skills", name, NULL);
+		gchar *skill_path = g_build_filename(skill_dir, "SKILL.md", NULL);
+
+		g_mkdir_with_parents(skill_dir, 0755);
+
+		gchar *file_content = g_strdup_printf(SKILL_TEMPLATE, name);
+		utils_write_file(skill_path, file_content);
+		g_free(file_content);
+
+		document_open_file(skill_path, FALSE, NULL, NULL);
+
+		g_free(skill_path);
+		g_free(skill_dir);
+		g_free(base_path);
+		break;
+	}
+	gtk_widget_destroy(dialog);
+}
+
 static gboolean on_vte_button_press(GtkWidget *widget,
                                     GdkEventButton *event,
                                     G_GNUC_UNUSED gpointer data)
@@ -240,6 +439,10 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 	GtkWidget *rename_item = gtk_menu_item_new_with_label("Rename Tab");
 	g_signal_connect(rename_item, "activate", G_CALLBACK(on_rename_tab_activate), NULL);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), rename_item);
+
+	GtkWidget *new_skill_item = gtk_menu_item_new_with_label("New Skill");
+	g_signal_connect(new_skill_item, "activate", G_CALLBACK(on_new_skill_activate), NULL);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), new_skill_item);
 
 	GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
 	gchar        *clip_text = gtk_clipboard_wait_for_text(clipboard);
@@ -324,6 +527,7 @@ static void ga_load_config(void)
 			g_free(agent_cmd);
 			agent_cmd = v;
 		}
+		use_askpass = g_key_file_get_boolean(kf, "agent", "use_askpass", NULL);
 	}
 	g_key_file_free(kf);
 
@@ -336,8 +540,8 @@ static void ga_save_config(void)
 	GKeyFile *kf   = g_key_file_new();
 	gchar    *data = NULL;
 
-	g_key_file_set_string(kf, "agent", "cmd",
-	                      agent_cmd ? agent_cmd : DEFAULT_CMD);
+	g_key_file_set_string(kf,  "agent", "cmd",        agent_cmd ? agent_cmd : DEFAULT_CMD);
+	g_key_file_set_boolean(kf, "agent", "use_askpass", use_askpass);
 	data = g_key_file_to_data(kf, NULL, NULL);
 	utils_write_file(config_file, data);
 	g_free(data);
@@ -348,7 +552,7 @@ static void ga_save_config(void)
 /* ------------------------------------------------------------------ */
 /* Configure dialog                                                    */
 
-typedef struct { GtkWidget *cmd_entry; } ConfigWidgets;
+typedef struct { GtkWidget *cmd_entry; GtkWidget *askpass_check; } ConfigWidgets;
 
 static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
                                   gint response, ConfigWidgets *cw)
@@ -357,7 +561,8 @@ static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
 	{
 		const gchar *new_cmd = gtk_entry_get_text(GTK_ENTRY(cw->cmd_entry));
 		g_free(agent_cmd);
-		agent_cmd = g_strdup(new_cmd);
+		agent_cmd   = g_strdup(new_cmd);
+		use_askpass = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cw->askpass_check));
 		ga_save_config();
 	}
 	g_free(cw);
@@ -367,17 +572,26 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
                                GtkDialog *dialog,
                                G_GNUC_UNUSED gpointer data)
 {
-	ConfigWidgets *cw    = g_new0(ConfigWidgets, 1);
-	GtkWidget     *vbox  = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-	GtkWidget     *label = gtk_label_new("Agent command:");
+	ConfigWidgets *cw   = g_new0(ConfigWidgets, 1);
+	GtkWidget     *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
 
-	gtk_widget_set_halign(label, GTK_ALIGN_START);
+	GtkWidget *cmd_label = gtk_label_new("Agent command:");
+	gtk_widget_set_halign(cmd_label, GTK_ALIGN_START);
 	cw->cmd_entry = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),
 	                   agent_cmd ? agent_cmd : DEFAULT_CMD);
 
-	gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry, FALSE, FALSE, 0);
+	cw->askpass_check = gtk_check_button_new_with_label(
+	    "Intercept sudo with GUI password dialog (Linux only, requires zenity or ssh-askpass)");
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cw->askpass_check), use_askpass);
+	gtk_widget_set_tooltip_text(cw->askpass_check,
+	    "When enabled, a sudo wrapper is injected into PATH so that sudo commands\n"
+	    "issued by the agent show a graphical password dialog instead of prompting\n"
+	    "on the terminal. This prevents passwords appearing in command strings or history.");
+
+	gtk_box_pack_start(GTK_BOX(vbox), cmd_label,        FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,    FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->askpass_check, FALSE, FALSE, 4);
 
 	g_signal_connect(dialog, "response",
 	                 G_CALLBACK(on_configure_response), cw);
@@ -401,6 +615,8 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 	g_free(config_dir);
 
 	ga_load_config();
+	if (use_askpass)
+		setup_askpass();
 	create_agent_tab();
 
 	running = TRUE;
@@ -430,6 +646,8 @@ static void ga_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
 		agent_label = NULL;
 		tab_index   = -1;
 	}
+
+	cleanup_askpass();
 
 	g_free(agent_cmd);
 	agent_cmd = NULL;
