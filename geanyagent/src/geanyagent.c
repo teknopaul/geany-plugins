@@ -210,10 +210,24 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 	if (event->button != 3)
 		return FALSE;
 
-	VteTerminal *vte  = VTE_TERMINAL(widget);
-	GtkWidget   *menu = gtk_menu_new();
+	VteTerminal *vte        = VTE_TERMINAL(widget);
+	gboolean     has_sel    = vte_terminal_get_has_selection(vte);
+
+	/* Capture selection to CLIPBOARD now, before the menu event loop may
+	 * clear VTE's selection state. */
+	if (has_sel)
+	{
+#if VTE_CHECK_VERSION(0, 50, 0)
+		vte_terminal_copy_clipboard_format(vte, VTE_FORMAT_TEXT);
+#else
+		vte_terminal_copy_clipboard(vte);
+#endif
+	}
+
+	GtkWidget *menu = gtk_menu_new();
 
 	GtkWidget *copy_item = gtk_menu_item_new_with_label("Copy");
+	gtk_widget_set_sensitive(copy_item, has_sel);
 	g_signal_connect(copy_item, "activate", G_CALLBACK(on_copy_activate), vte);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), copy_item);
 
