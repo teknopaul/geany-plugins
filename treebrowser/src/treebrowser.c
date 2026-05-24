@@ -1518,10 +1518,40 @@ create_popup_menu(const gchar *name, const gchar *uri)
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_open_terminal), g_strdup(uri), (GClosureNotify)g_free, 0);
 
-	item = ui_image_menu_item_new("utilities-terminal", _("Execute _cli"));
-	gtk_container_add(GTK_CONTAINER(menu), item);
-	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_execute_in_terminal), g_strdup(uri), (GClosureNotify)g_free, 0);
-	gtk_widget_set_sensitive(item, is_executable);
+	/* Dynamic file/dir tools from filetypetools.conf via geanycli-append-tools signal.
+	 * Falls back to the static "Execute Cli" item when geanycli is not loaded or has
+	 * no tools configured for this path. */
+	{
+		GType    obj_type      = G_OBJECT_TYPE(geany->object);
+		gboolean showed_tools  = FALSE;
+
+		if (is_exists && g_signal_lookup("geanycli-append-tools", obj_type))
+		{
+			GtkWidget *submenu = gtk_menu_new();
+			g_signal_emit_by_name(geany->object, "geanycli-append-tools",
+			                      uri, is_dir, (gpointer)submenu);
+			GList *children = gtk_container_get_children(GTK_CONTAINER(submenu));
+			if (children)
+			{
+				item = ui_image_menu_item_new("system-run", _("_File Tools"));
+				gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), submenu);
+				gtk_container_add(GTK_CONTAINER(menu), item);
+				gtk_widget_show(submenu);
+				showed_tools = TRUE;
+				g_list_free(children);
+			}
+			else
+				gtk_widget_destroy(submenu);
+		}
+
+		if (!showed_tools && is_executable)
+		{
+			item = ui_image_menu_item_new("utilities-terminal", _("Execute _cli"));
+			gtk_container_add(GTK_CONTAINER(menu), item);
+			g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_execute_in_terminal),
+			                      g_strdup(uri), (GClosureNotify)g_free, 0);
+		}
+	}
 
 	item = ui_image_menu_item_new("system-run", _("_Run"));
 	gtk_container_add(GTK_CONTAINER(menu), item);
@@ -1613,27 +1643,27 @@ create_popup_menu(const gchar *name, const gchar *uri)
 	gtk_widget_set_sensitive(item, is_dir);
 
 #if GTK_CHECK_VERSION(3, 10, 0)
-	item = ui_image_menu_item_new("edit-copy", _("_Copy Full Path to Clipboard"));
+	item = ui_image_menu_item_new("edit-copy", _("_Copy Full Path"));
 #else
-	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("_Copy Full Path to Clipboard"));
+	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("_Copy Full Path"));
 #endif
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_uri), g_strdup(uri), (GClosureNotify)g_free, 0);
 	gtk_widget_set_sensitive(item, is_exists);
 
 #if GTK_CHECK_VERSION(3, 10, 0)
-	item = ui_image_menu_item_new("edit-copy", _("Copy _Relative Path to Clipboard"));
+	item = ui_image_menu_item_new("edit-copy", _("Copy _Relative Path"));
 #else
-	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("Copy _Relative Path to Clipboard"));
+	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("Copy _Relative Path"));
 #endif
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_relative_uri), g_strdup(uri), (GClosureNotify)g_free, 0);
 	gtk_widget_set_sensitive(item, is_exists);
 
 #if GTK_CHECK_VERSION(3, 10, 0)
-	item = ui_image_menu_item_new("edit-copy", _("Copy File _Name to Clipboard"));
+	item = ui_image_menu_item_new("edit-copy", _("Copy File _Name"));
 #else
-	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("Copy File _Name to Clipboard"));
+	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("Copy File _Name"));
 #endif
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_name), g_strdup(uri), (GClosureNotify)g_free, 0);

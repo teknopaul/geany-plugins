@@ -450,11 +450,13 @@ static const gchar *tools_find_section(const gchar *filepath)
     return g_key_file_has_group(tools_config, ".*") ? ".*" : NULL;
 }
 
-/* Expand %p %d %f %e %l in tmpl using filepath. Caller frees result. */
+/* Expand %p %d %f %e %l in tmpl using filepath. Caller frees result.
+ * When filepath is a directory, %d expands to the directory itself (not its parent). */
 static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 {
     GString *out  = g_string_sized_new(256);
-    gchar   *dir  = g_path_get_dirname(filepath);
+    gboolean is_dir = g_file_test(filepath, G_FILE_TEST_IS_DIR);
+    gchar   *dir  = is_dir ? g_strdup(filepath) : g_path_get_dirname(filepath);
     gchar   *base = g_path_get_basename(filepath);
     const gchar *first_dot = strchr(base, '.');
     gchar   *stem = first_dot ? g_strndup(base, (gsize)(first_dot - base))
@@ -525,6 +527,93 @@ static void on_tool_item_activate(GtkMenuItem *item,
         do_run_command(cmd, FALSE);
 }
 
+/* Append tool items from one filetypetools.conf section to submenu.
+ * Uses name_N key if present, otherwise falls back to the tool_N template.
+ * Returns TRUE if at least one item was added. */
+static gboolean tools_append_section_items(GtkWidget *submenu,
+                                            const gchar *section,
+                                            const gchar *path)
+{
+    gboolean any = FALSE;
+    for (gint i = 0; ; i++) {
+        gchar *tool_key = g_strdup_printf("tool_%d", i);
+        gchar *tmpl     = g_key_file_get_string(tools_config, section, tool_key, NULL);
+        g_free(tool_key);
+        if (!tmpl)
+            break;
+
+        gchar *name_key = g_strdup_printf("name_%d", i);
+        gchar *name     = g_key_file_get_string(tools_config, section, name_key, NULL);
+        g_free(name_key);
+
+        gchar     *cmd = tools_format_cmd(tmpl, path);
+        GtkWidget *mi  = gtk_menu_item_new_with_label(name ? name : tmpl);
+        gtk_widget_set_tooltip_text(mi, cmd);
+        g_object_set_data_full(G_OBJECT(mi), "tool-cmd", cmd, g_free);
+        g_signal_connect(mi, "activate", G_CALLBACK(on_tool_item_activate), NULL);
+        gtk_menu_shell_append(GTK_MENU_SHELL(submenu), mi);
+        gtk_widget_show(mi);
+
+        g_free(tmpl);
+        g_free(name);
+        any = TRUE;
+    }
+    return any;
+}
+
+/* Returns a newly-allocated list of matching section-name strings for a directory.
+ * Checks [dir:marker] sections (marker file must exist in dirpath) then [dir].
+ * Caller must g_free each element and g_slist_free the list. */
+static GSList *tools_find_dir_sections(const gchar *dirpath)
+{
+    GSList *result = NULL;
+    if (!tools_config || !dirpath)
+        return NULL;
+
+    gsize   ng;
+    gchar **groups = g_key_file_get_groups(tools_config, &ng);
+    for (gsize gi = 0; gi < ng; gi++) {
+        const gchar *group = groups[gi];
+        if (g_str_has_prefix(group, "dir:")) {
+            const gchar *marker      = group + 4;
+            gchar       *marker_path = g_build_filename(dirpath, marker, NULL);
+            if (g_file_test(marker_path, G_FILE_TEST_EXISTS))
+                result = g_slist_append(result, g_strdup(group));
+            g_free(marker_path);
+        } else if (g_strcmp0(group, "dir") == 0) {
+            result = g_slist_append(result, g_strdup(group));
+        }
+    }
+    g_strfreev(groups);
+    return result;
+}
+
+/* Signal handler: populate a caller-supplied GtkMenu with tools for path.
+ * For files, matches by extension; for directories, matches [dir:marker] sections. */
+static void on_append_tools_signal(G_GNUC_UNUSED GObject *obj,
+                                   const gchar *path,
+                                   gboolean     is_dir,
+                                   gpointer     submenu_ptr,
+                                   G_GNUC_UNUSED gpointer data)
+{
+    GtkWidget *submenu = GTK_WIDGET(submenu_ptr);
+    if (!tools_config || !path || !submenu)
+        return;
+
+    if (is_dir) {
+        GSList *sections = tools_find_dir_sections(path);
+        for (GSList *s = sections; s; s = s->next) {
+            tools_append_section_items(submenu, (const gchar *)s->data, path);
+            g_free(s->data);
+        }
+        g_slist_free(sections);
+    } else {
+        const gchar *section = tools_find_section(path);
+        if (section)
+            tools_append_section_items(submenu, section, path);
+    }
+}
+
 /* Rebuild the "File Tools" submenu for the given filepath.
  * Pass NULL to clear and disable the menu. */
 static void tools_menu_populate(const gchar *filepath)
@@ -549,28 +638,8 @@ static void tools_menu_populate(const gchar *filepath)
     }
 
     GtkWidget *submenu = gtk_menu_new();
-    gboolean   any     = FALSE;
 
-    for (gint i = 0; ; i++) {
-        gchar *key  = g_strdup_printf("tool_%d", i);
-        gchar *tmpl = g_key_file_get_string(tools_config, section, key, NULL);
-        g_free(key);
-        if (!tmpl)
-            break;
-
-        gchar     *cmd = tools_format_cmd(tmpl, filepath);
-        GtkWidget *mi  = gtk_menu_item_new_with_label(tmpl);
-        gtk_widget_set_tooltip_text(mi, cmd);
-        g_object_set_data_full(G_OBJECT(mi), "tool-cmd", cmd, g_free);
-        g_signal_connect(mi, "activate",
-                         G_CALLBACK(on_tool_item_activate), NULL);
-        gtk_menu_shell_append(GTK_MENU_SHELL(submenu), mi);
-        gtk_widget_show(mi);
-        g_free(tmpl);
-        any = TRUE;
-    }
-
-    if (any) {
+    if (tools_append_section_items(submenu, section, filepath)) {
         gtk_menu_item_set_submenu(GTK_MENU_ITEM(tools_menu_item), submenu);
         gtk_widget_set_sensitive(tools_menu_item, TRUE);
         gtk_widget_show(submenu);
@@ -690,6 +759,23 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     plugin_signal_connect(plugin, geany->object,
                           "geanycli-run-file", FALSE,
                           G_CALLBACK(on_run_file_signal), NULL);
+
+    /* geanycli-append-tools: populate a caller-supplied GtkMenu with file/dir tools */
+    if (!g_signal_lookup("geanycli-append-tools", obj_type))
+        g_signal_new("geanycli-append-tools",
+                     obj_type,
+                     G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL,
+                     g_cclosure_marshal_generic,
+                     G_TYPE_NONE,
+                     3,
+                     G_TYPE_STRING,   /* path   */
+                     G_TYPE_BOOLEAN,  /* is_dir */
+                     G_TYPE_POINTER); /* GtkWidget *submenu */
+
+    plugin_signal_connect(plugin, geany->object,
+                          "geanycli-append-tools", FALSE,
+                          G_CALLBACK(on_append_tools_signal), NULL);
 
     return TRUE;
 }
