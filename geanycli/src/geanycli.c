@@ -370,6 +370,7 @@ G_MODULE_EXPORT void geanycli_run_command(const gchar *cmd, gboolean new_tab)
 }
 
 
+
 /* ------------------------------------------------------------------ */
 /* New-tab button                                                      */
 
@@ -487,6 +488,33 @@ static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
     g_free(base);
     g_free(stem);
     return g_string_free(out, FALSE);
+}
+
+/* Looks up filepath in filetypetools.conf, expands tool_0 for its section,
+ * and runs the result.  Returns TRUE if a command was found and dispatched. */
+G_MODULE_EXPORT gboolean geanycli_run_file(const gchar *filepath, gboolean new_tab)
+{
+    if (!filepath || !tools_config)
+        return FALSE;
+    const gchar *section = tools_find_section(filepath);
+    if (!section)
+        return FALSE;
+    gchar *tmpl = g_key_file_get_string(tools_config, section, "tool_0", NULL);
+    if (!tmpl)
+        return FALSE;
+    gchar *cmd = tools_format_cmd(tmpl, filepath);
+    g_free(tmpl);
+    do_run_command(cmd, new_tab);
+    g_free(cmd);
+    return TRUE;
+}
+
+static void on_run_file_signal(G_GNUC_UNUSED GObject *obj,
+                               const gchar *filepath,
+                               gboolean     new_tab,
+                               G_GNUC_UNUSED gpointer data)
+{
+    geanycli_run_file(filepath, new_tab);
 }
 
 static void on_tool_item_activate(GtkMenuItem *item,
@@ -629,7 +657,7 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
                           G_CALLBACK(on_project_close), NULL);
 
-    /* Register the IPC signal on the Geany application object.
+    /* Register IPC signals on the Geany application object.
      * g_signal_lookup guards against duplicate registration on reload. */
     GType obj_type = G_OBJECT_TYPE(geany->object);
     if (!g_signal_lookup("geanycli-run-command", obj_type))
@@ -640,12 +668,28 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
                      g_cclosure_marshal_generic,
                      G_TYPE_NONE,
                      2,
-                     G_TYPE_STRING,
-                     G_TYPE_BOOLEAN);
+                     G_TYPE_STRING,   /* cmd     */
+                     G_TYPE_BOOLEAN); /* new_tab */
 
     plugin_signal_connect(plugin, geany->object,
                           "geanycli-run-command", FALSE,
                           G_CALLBACK(on_ipc_signal), NULL);
+
+    /* geanycli-run-file: look up filepath in filetypetools.conf and run tool_0 */
+    if (!g_signal_lookup("geanycli-run-file", obj_type))
+        g_signal_new("geanycli-run-file",
+                     obj_type,
+                     G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL,
+                     g_cclosure_marshal_generic,
+                     G_TYPE_NONE,
+                     2,
+                     G_TYPE_STRING,   /* filepath */
+                     G_TYPE_BOOLEAN); /* new_tab  */
+
+    plugin_signal_connect(plugin, geany->object,
+                          "geanycli-run-file", FALSE,
+                          G_CALLBACK(on_run_file_signal), NULL);
 
     return TRUE;
 }

@@ -747,8 +747,8 @@ ENABLE_GITCHANGEBAR_FALSE
 ENABLE_GITCHANGEBAR_TRUE
 GITCHANGEBAR_LIBS
 GITCHANGEBAR_CFLAGS
-ENABLE_GEANYTERMINAL_FALSE
-ENABLE_GEANYTERMINAL_TRUE
+ENABLE_GEANYCLI_FALSE
+ENABLE_GEANYCLI_TRUE
 ENABLE_GEANYAGENT_FALSE
 ENABLE_GEANYAGENT_TRUE
 ENABLE_GENIUSPASTE_FALSE
@@ -1030,7 +1030,7 @@ with_gpgme_prefix
 enable_largefile
 enable_geniuspaste
 enable_geanyagent
-enable_geanyterminal
+enable_geanycli
 enable_gitchangebar
 enable_keyrecord
 enable_lineoperations
@@ -1797,7 +1797,7 @@ Optional Features:
   --disable-largefile     omit support for large files
   --disable-geniuspaste   Do not build the GeniusPaste plugin
   --disable-geanyagent    Do not build the Geanyagent plugin
-  --disable-geanyterminal Do not build the Geanyterminal plugin
+  --disable-geanycli      Do not build the Geanycli plugin
   --disable-gitchangebar  Do not build the GitChangeBar plugin
   --disable-keyrecord     Do not build the Keyrecord plugin
   --disable-lineoperations
@@ -21342,18 +21342,18 @@ fi
 
 
 
-    # Check whether --enable-geanyterminal was given.
-if test ${enable_geanyterminal+y}
+    # Check whether --enable-geanycli was given.
+if test ${enable_geanycli+y}
 then :
-  enableval=$enable_geanyterminal; enable_geanyterminal=$enableval
+  enableval=$enable_geanycli; enable_geanycli=$enableval
 else $as_nop
   case $gp_enable_all in #(
   no) :
-    enable_geanyterminal=no ;; #(
+    enable_geanycli=no ;; #(
   yes) :
-    enable_geanyterminal=yes ;; #(
+    enable_geanycli=yes ;; #(
   *) :
-    enable_geanyterminal=auto ;;
+    enable_geanycli=auto ;;
 esac
 fi
 
@@ -21380,12 +21380,12 @@ fi
 
 
 
-    if test "$enable_geanyterminal" = no
+    if test "$enable_geanycli" = no
 then :
 
 else $as_nop
-  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the GTK version in use is compatible with plugin geanyterminal" >&5
-printf %s "checking whether the GTK version in use is compatible with plugin geanyterminal... " >&6; }
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the GTK version in use is compatible with plugin geanycli" >&5
+printf %s "checking whether the GTK version in use is compatible with plugin geanycli... " >&6; }
            if test ${GP_GTK_VERSION_MAJOR} = $gtk_dep
 then :
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
@@ -21393,19 +21393,19 @@ printf "%s\n" "yes" >&6; }
 else $as_nop
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
 printf "%s\n" "no" >&6; }
-                  if test "$enable_geanyterminal" = yes
+                  if test "$enable_geanycli" = yes
 then :
-  as_fn_error $? "geanyterminal is not compatible with the GTK version in use" "$LINENO" 5
-elif test "$enable_geanyterminal" = auto
+  as_fn_error $? "geanycli is not compatible with the GTK version in use" "$LINENO" 5
+elif test "$enable_geanycli" = auto
 then :
-  enable_geanyterminal=no
+  enable_geanycli=no
 fi
 fi
 fi
 
     fi
 
-    if test "$enable_geanyterminal" = "yes"; then
+    if test "$enable_geanycli" = "yes"; then
 
 pkg_failed=no
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for ${vte_package} >= ${vte_version}" >&5
@@ -21497,7 +21497,7 @@ else
 printf "%s\n" "yes" >&6; }
 
 fi
-    elif test "$enable_geanyterminal" = "auto"; then
+    elif test "$enable_geanycli" = "auto"; then
 
 pkg_failed=no
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for ${vte_package} >= ${vte_version}" >&5
@@ -21557,11 +21557,11 @@ fi
 	# Put the nasty error message in config.log where it belongs
 	echo "$VTE_PKG_ERRORS" >&5
 
-	enable_geanyterminal=no
+	enable_geanycli=no
 elif test $pkg_failed = untried; then
         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
 printf "%s\n" "no" >&6; }
-	enable_geanyterminal=no
+	enable_geanycli=no
 else
 	VTE_CFLAGS=$pkg_cv_VTE_CFLAGS
 	VTE_LIBS=$pkg_cv_VTE_LIBS
@@ -21574,24 +21574,24 @@ fi
 esac
 
 
-        if test "$enable_geanyterminal" = "auto"; then
-        enable_geanyterminal=yes
+        if test "$enable_geanycli" = "auto"; then
+        enable_geanycli=yes
     fi
-     if test "$enable_geanyterminal" = yes; then
-  ENABLE_GEANYTERMINAL_TRUE=
-  ENABLE_GEANYTERMINAL_FALSE='#'
+     if test "$enable_geanycli" = yes; then
+  ENABLE_GEANYCLI_TRUE=
+  ENABLE_GEANYCLI_FALSE='#'
 else
-  ENABLE_GEANYTERMINAL_TRUE='#'
-  ENABLE_GEANYTERMINAL_FALSE=
+  ENABLE_GEANYCLI_TRUE='#'
+  ENABLE_GEANYCLI_FALSE=
 fi
 
 
-    plugins_statusmsg="${plugins_statusmsg}Geanyterminal:$enable_geanyterminal
+    plugins_statusmsg="${plugins_statusmsg}Geanycli:$enable_geanycli
 "
 
 
 
-    ac_config_files="$ac_config_files geanyterminal/Makefile geanyterminal/src/Makefile"
+    ac_config_files="$ac_config_files geanycli/Makefile geanycli/src/Makefile"
 
 
 
@@ -25819,8 +25819,8 @@ if test -z "${ENABLE_GEANYAGENT_TRUE}" && test -z "${ENABLE_GEANYAGENT_FALSE}"; 
   as_fn_error $? "conditional \"ENABLE_GEANYAGENT\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
-if test -z "${ENABLE_GEANYTERMINAL_TRUE}" && test -z "${ENABLE_GEANYTERMINAL_FALSE}"; then
-  as_fn_error $? "conditional \"ENABLE_GEANYTERMINAL\" was never defined.
+if test -z "${ENABLE_GEANYCLI_TRUE}" && test -z "${ENABLE_GEANYCLI_FALSE}"; then
+  as_fn_error $? "conditional \"ENABLE_GEANYCLI\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${ENABLE_GITCHANGEBAR_TRUE}" && test -z "${ENABLE_GITCHANGEBAR_FALSE}"; then
@@ -26877,8 +26877,8 @@ do
     "geniuspaste/src/Makefile") CONFIG_FILES="$CONFIG_FILES geniuspaste/src/Makefile" ;;
     "geanyagent/Makefile") CONFIG_FILES="$CONFIG_FILES geanyagent/Makefile" ;;
     "geanyagent/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyagent/src/Makefile" ;;
-    "geanyterminal/Makefile") CONFIG_FILES="$CONFIG_FILES geanyterminal/Makefile" ;;
-    "geanyterminal/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyterminal/src/Makefile" ;;
+    "geanycli/Makefile") CONFIG_FILES="$CONFIG_FILES geanycli/Makefile" ;;
+    "geanycli/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanycli/src/Makefile" ;;
     "git-changebar/Makefile") CONFIG_FILES="$CONFIG_FILES git-changebar/Makefile" ;;
     "git-changebar/data/Makefile") CONFIG_FILES="$CONFIG_FILES git-changebar/data/Makefile" ;;
     "git-changebar/src/Makefile") CONFIG_FILES="$CONFIG_FILES git-changebar/src/Makefile" ;;

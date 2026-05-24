@@ -14,7 +14,7 @@ indent_width=4
 indent_type=1
 indent_hard_tab_width=8
 detect_indent=false
-detect_indent_width=false
+detect_indent_width=true
 indent_mode=2
 
 [project]
@@ -28,12 +28,7 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=4
-FILE_NAME_0=29;Javascript;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.js;0;4
-FILE_NAME_1=0;JSON;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.json;0;4
-FILE_NAME_2=0;Sh;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Ftest.sh;0;4
-FILE_NAME_3=0;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2Fgeanycli.c;0;4
-FILE_NAME_4=0;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyagent%2Fsrc%2Fgeanyagent.c;0;4
+current_page=-1
 
 [VTE]
 last_dir=/home/teknopaul

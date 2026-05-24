@@ -1056,6 +1056,45 @@ on_menu_find_in_files(GtkMenuItem *menuitem, gchar *uri)
 	search_show_find_in_files_dialog(uri);
 }
 
+/* Shows a modal dialog asking for a filename. Returns newly allocated string or NULL on cancel. */
+static gchar *
+ask_for_filename(const gchar *title, const gchar *default_name)
+{
+	GtkWidget *dialog = gtk_dialog_new_with_buttons(
+		title,
+		GTK_WINDOW(geany_data->main_widgets->window),
+		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+		_("_Cancel"), GTK_RESPONSE_CANCEL,
+		_("_Create"), GTK_RESPONSE_OK,
+		NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+
+	GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	gtk_container_set_border_width(GTK_CONTAINER(content), 8);
+
+	GtkWidget *label = gtk_label_new(_("File name:"));
+	gtk_widget_set_halign(label, GTK_ALIGN_START);
+	gtk_box_pack_start(GTK_BOX(content), label, FALSE, FALSE, 2);
+
+	GtkWidget *entry = gtk_entry_new();
+	if (default_name && *default_name)
+		gtk_entry_set_text(GTK_ENTRY(entry), default_name);
+	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+	gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
+	gtk_box_pack_start(GTK_BOX(content), entry, FALSE, FALSE, 2);
+	gtk_widget_show_all(dialog);
+
+	gchar *result = NULL;
+	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
+	{
+		const gchar *text = gtk_entry_get_text(GTK_ENTRY(entry));
+		if (text && *text)
+			result = g_strdup(text);
+	}
+	gtk_widget_destroy(dialog);
+	return result;
+}
+
 static void
 on_menu_create_new_object(GtkMenuItem *menuitem, const gchar *type)
 {
@@ -1081,7 +1120,6 @@ on_menu_create_new_object(GtkMenuItem *menuitem, const gchar *type)
 			else
 			{
 				SETPTR(uri, g_path_get_dirname(uri));
-				
 				refresh_root = TRUE;
 			}
 		}
@@ -1092,37 +1130,57 @@ on_menu_create_new_object(GtkMenuItem *menuitem, const gchar *type)
 		uri 			= g_strdup(addressbar_last_address);
 	}
 
-	if (utils_str_equal(type, "directory"))
-		uri_new = g_strconcat(uri, G_DIR_SEPARATOR_S, _("NewDirectory"), NULL);
-	else if (utils_str_equal(type, "file"))
-		uri_new = g_strconcat(uri, G_DIR_SEPARATOR_S, _("NewFile"), NULL);
-
-	if (uri_new)
+	if (utils_str_equal(type, "file"))
 	{
+		/* Ask for the filename upfront so we can create it with the right name
+		 * and open it in Geany without fighting the inline-rename focus. */
+		gchar *fname = ask_for_filename(_("New File"), "");
+		if (!fname)
+		{
+			g_free(uri);
+			return;
+		}
+		uri_new = g_build_filename(uri, fname, NULL);
+		g_free(fname);
+
+		if (g_file_test(uri_new, G_FILE_TEST_EXISTS) &&
+			!dialogs_show_question(_("Target file '%s' exists.\nDo you really want to replace it with an empty file?"), uri_new))
+		{
+			g_free(uri_new);
+			g_free(uri);
+			return;
+		}
+
+		gint fd = g_creat(uri_new, 0644);
+		if (fd != -1)
+		{
+			close(fd);
+			treebrowser_browse(uri, refresh_root ? NULL : &iter);
+			if (CONFIG_OPEN_NEW_FILES)
+				document_open_file(uri_new, FALSE, NULL, NULL);
+		}
+		g_free(uri_new);
+	}
+	else if (utils_str_equal(type, "directory"))
+	{
+		uri_new = g_strconcat(uri, G_DIR_SEPARATOR_S, _("NewDirectory"), NULL);
+
 		if (!(g_file_test(uri_new, G_FILE_TEST_EXISTS) &&
 			!dialogs_show_question(_("Target file '%s' exists.\nDo you really want to replace it with an empty file?"), uri_new)))
 		{
-			gboolean creation_success = FALSE;
-
-			while(g_file_test(uri_new, G_FILE_TEST_EXISTS))
+			while (g_file_test(uri_new, G_FILE_TEST_EXISTS))
 				SETPTR(uri_new, g_strconcat(uri_new, "_", NULL));
 
-			if (utils_str_equal(type, "directory"))
-				creation_success = (g_mkdir(uri_new, 0755) == 0);
-			else
-				creation_success = (g_creat(uri_new, 0644) != -1);
-
-			if (creation_success)
+			if (g_mkdir(uri_new, 0755) == 0)
 			{
 				treebrowser_browse(uri, refresh_root ? NULL : &iter);
 				if (treebrowser_search(uri_new, NULL))
 					treebrowser_rename_current();
-				if (utils_str_equal(type, "file") && CONFIG_OPEN_NEW_FILES == TRUE)
-					document_open_file(uri_new,FALSE, NULL,NULL);
 			}
 		}
 		g_free(uri_new);
 	}
+
 	/* cppcheck-suppress doubleFree symbolName=uri */
 	g_free(uri);
 }
@@ -1265,23 +1323,107 @@ on_menu_copy_relative_uri(GtkMenuItem *menuitem, gchar *uri)
 }
 
 static void
+on_menu_copy_name(GtkMenuItem *menuitem, gchar *uri)
+{
+	gchar *name = g_path_get_basename(uri);
+	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), name, -1);
+	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_PRIMARY), name, -1);
+	g_free(name);
+}
+
+/* Returns the interpreter to use for a script file (e.g. "bash", "python3").
+ * Reads the shebang first; falls back to file extension. Caller frees result. */
+static gchar *
+get_script_interpreter(const gchar *uri)
+{
+	FILE *fp = fopen(uri, "r");
+	if (fp)
+	{
+		char buf[256] = {0};
+		if (fgets(buf, sizeof(buf), fp) && strncmp(buf, "#!", 2) == 0)
+		{
+			fclose(fp);
+			gchar *interp = g_strstrip(g_strdup(buf + 2));
+			/* /usr/bin/env PROG → PROG */
+			const gchar *env_marker = "/usr/bin/env ";
+			if (g_str_has_prefix(interp, env_marker))
+			{
+				gchar *prog = g_strdup(interp + strlen(env_marker));
+				g_free(interp);
+				/* strip any trailing args */
+				gchar *space = strchr(prog, ' ');
+				if (space) *space = '\0';
+				return prog;
+			}
+			/* strip args from bare path (/bin/bash -x → /bin/bash) */
+			gchar *space = strchr(interp, ' ');
+			if (space) *space = '\0';
+			return interp;
+		}
+		fclose(fp);
+	}
+
+	/* extension fallback */
+	const gchar *ext = strrchr(uri, '.');
+	if (ext)
+	{
+		if (g_strcmp0(ext, ".sh") == 0 || g_strcmp0(ext, ".bash") == 0)
+			return g_strdup("bash");
+		if (g_strcmp0(ext, ".py") == 0)
+			return g_strdup("python3");
+		if (g_strcmp0(ext, ".rb") == 0)
+			return g_strdup("ruby");
+		if (g_strcmp0(ext, ".pl") == 0)
+			return g_strdup("perl");
+		if (g_strcmp0(ext, ".js") == 0)
+			return g_strdup("node");
+	}
+
+	return NULL;
+}
+
+static void
 on_menu_execute_in_terminal(GtkMenuItem *menuitem, gchar *uri)
 {
 	GType obj_type = G_OBJECT_TYPE(geany->object);
 
-	if (g_signal_lookup("geanyterminal-run-command", obj_type))
+	/* 1. geanycli file-type-aware: looks up filetypetools.conf for this file */
+	if (g_signal_lookup("geanycli-run-file", obj_type))
 	{
-		gchar *quoted = g_shell_quote(uri);
-		g_signal_emit_by_name(geany->object, "geanyterminal-run-command", quoted, TRUE);
-		g_free(quoted);
+		g_signal_emit_by_name(geany->object, "geanycli-run-file", uri, FALSE);
 		return;
 	}
 
-	/* Fallback: launch configured external terminal */
-	gchar *dir = g_path_get_dirname(uri);
-	gchar *quoted = g_shell_quote(uri);
-	gchar *cmd = g_strconcat(CONFIG_OPEN_TERMINAL, " -e ", quoted, NULL);
-	GError *error = NULL;
+	/* 2. Detect interpreter from shebang / extension for the generic path */
+	gchar *interp     = get_script_interpreter(uri);
+	gchar *cmd_to_run = interp
+		? g_strconcat(interp, " ", uri, NULL)
+		: g_strdup(uri);
+	g_free(interp);
+
+	/* 3. geanycli generic: run an arbitrary command in the terminal tab */
+	if (g_signal_lookup("geanycli-run-command", obj_type))
+	{
+		g_signal_emit_by_name(geany->object, "geanycli-run-command", cmd_to_run, FALSE);
+		g_free(cmd_to_run);
+		return;
+	}
+
+	/* 4. Legacy geanyterminal */
+	if (g_signal_lookup("geanyterminal-run-command", obj_type))
+	{
+		gchar *quoted = g_shell_quote(cmd_to_run);
+		g_signal_emit_by_name(geany->object, "geanyterminal-run-command", quoted, TRUE);
+		g_free(quoted);
+		g_free(cmd_to_run);
+		return;
+	}
+
+	/* 5. Last resort: spawn external terminal */
+	gchar  *dir    = g_path_get_dirname(uri);
+	gchar  *quoted = g_shell_quote(cmd_to_run);
+	gchar  *cmd    = g_strconcat(CONFIG_OPEN_TERMINAL, " -e ", quoted, NULL);
+	GError *error  = NULL;
 
 	if (!spawn_async(dir, cmd, NULL, NULL, NULL, &error))
 	{
@@ -1290,20 +1432,25 @@ on_menu_execute_in_terminal(GtkMenuItem *menuitem, gchar *uri)
 	}
 	g_free(quoted);
 	g_free(cmd);
+	g_free(cmd_to_run);
 	g_free(dir);
 }
 
 static void
 on_menu_run_file(GtkMenuItem *menuitem, gchar *uri)
 {
-	gchar *dir = g_path_get_dirname(uri);
-	GError *error = NULL;
+	gchar  *dir    = g_path_get_dirname(uri);
+	gchar  *interp = get_script_interpreter(uri);
+	gchar  *cmd    = interp ? g_strconcat(interp, " ", uri, NULL) : g_strdup(uri);
+	GError *error  = NULL;
 
-	if (!spawn_async(dir, uri, NULL, NULL, NULL, &error))
+	if (!spawn_async(dir, cmd, NULL, NULL, NULL, &error))
 	{
 		ui_set_statusbar(TRUE, _("Could not run '%s' (%s)."), uri, error->message);
 		g_error_free(error);
 	}
+	g_free(cmd);
+	g_free(interp);
 	g_free(dir);
 }
 
@@ -1337,7 +1484,10 @@ create_popup_menu(const gchar *name, const gchar *uri)
 	gboolean is_exists 		= g_file_test(uri, G_FILE_TEST_EXISTS);
 	gboolean is_dir 		= is_exists ? g_file_test(uri, G_FILE_TEST_IS_DIR) : FALSE;
 	gboolean is_document 	= document_find_by_filename(uri) != NULL ? TRUE : FALSE;
-	gboolean is_executable	= is_exists && !is_dir && g_file_test(uri, G_FILE_TEST_IS_EXECUTABLE);
+	gchar    *interp        = is_exists && !is_dir ? get_script_interpreter(uri) : NULL;
+	gboolean is_executable	= is_exists && !is_dir &&
+	                          (g_file_test(uri, G_FILE_TEST_IS_EXECUTABLE) || interp != NULL);
+	g_free(interp);
 
 #if GTK_CHECK_VERSION(3, 10, 0)
 	item = ui_image_menu_item_new("go-up", _("Go _Up"));
@@ -1479,6 +1629,15 @@ create_popup_menu(const gchar *name, const gchar *uri)
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_relative_uri), g_strdup(uri), (GClosureNotify)g_free, 0);
 	gtk_widget_set_sensitive(item, is_exists);
+
+#if GTK_CHECK_VERSION(3, 10, 0)
+	item = ui_image_menu_item_new("edit-copy", _("Copy File _Name to Clipboard"));
+#else
+	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("Copy File _Name to Clipboard"));
+#endif
+	gtk_container_add(GTK_CONTAINER(menu), item);
+	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_name), g_strdup(uri), (GClosureNotify)g_free, 0);
+	gtk_widget_set_sensitive(item, is_exists && !is_dir);
 
 	item = gtk_separator_menu_item_new();
 	gtk_container_add(GTK_CONTAINER(menu), item);
