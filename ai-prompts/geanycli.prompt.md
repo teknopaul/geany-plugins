@@ -1,8 +1,8 @@
-Ability to select text in the vte and and search for it on the Internet, started but does not work.
+treebrowser does not really have the concept of a "project", we need to add one.
 
-VTE removed clipboard support, because of some non-sense security threat when running "untrusted" code in the terminal which you never do.
+It has the concept of a root and and a chroot.
 
-But with the shift-drag trick we can get things into the clipboard, this means the clipboard is already full when the Agent and Cli tabs popups are shown for copy & paste.
+We need a button in the icons at the top bar, that sets the treebrowser root to the curent project root.
 
-Copy and pastenow work, using the same trick we need to add a "Internet Search" option to the popul that opens users default browser with the highlighted text ina configurable search engine defauilting to www.qwant.com/?q=%s
+Use gtks emblem-favorite for the icon image, and put it next to the home icon.
 

@@ -1745,6 +1745,18 @@ on_button_go_home(void)
 }
 
 static void
+on_button_go_project(void)
+{
+	GeanyProject *project = geany->app->project;
+	if (project && !EMPTY(project->base_path))
+	{
+		gchar *uri = utils_get_locale_from_utf8(project->base_path);
+		treebrowser_chroot(uri);
+		g_free(uri);
+	}
+}
+
+static void
 on_button_current_path(void)
 {
 	gchar *uri;
@@ -2229,6 +2241,16 @@ create_sidebar(void)
 #endif
 	gtk_widget_set_tooltip_text(wid, _("Home"));
 	g_signal_connect(wid, "clicked", G_CALLBACK(on_button_go_home), NULL);
+	gtk_container_add(GTK_CONTAINER(toolbar), wid);
+
+#if GTK_CHECK_VERSION(3, 10, 0)
+	wid = gtk_image_new_from_icon_name("emblem-favorite", GTK_ICON_SIZE_SMALL_TOOLBAR);
+	wid = GTK_WIDGET(gtk_tool_button_new(wid, NULL));
+#else
+	wid = GTK_WIDGET(gtk_tool_button_new_from_stock(GTK_STOCK_ABOUT));
+#endif
+	gtk_widget_set_tooltip_text(wid, _("Go to project root"));
+	g_signal_connect(wid, "clicked", G_CALLBACK(on_button_go_project), NULL);
 	gtk_container_add(GTK_CONTAINER(toolbar), wid);
 
 #if GTK_CHECK_VERSION(3, 10, 0)

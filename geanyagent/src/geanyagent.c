@@ -37,6 +37,9 @@ static gboolean     running     = FALSE;  /* FALSE during cleanup to suppress re
 
 static gchar *agent_cmd    = NULL;
 static gchar *config_file  = NULL;
+static gchar *search_url   = NULL;
+
+#define DEFAULT_SEARCH_URL "https://www.qwant.com/?q=%s"
 
 /* askpass: temp dir prepended to PATH containing a sudo wrapper + askpass script */
 static gboolean use_askpass = FALSE;  /* opt-in; disabled by default */
@@ -169,9 +172,12 @@ static void ga_send_command(const gchar *cmd)
 	if (!agent_term || !cmd || !*cmd)
 		return;
 	if (tab_index >= 0)
+	{
 		gtk_notebook_set_current_page(
 		    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
 		    tab_index);
+		gtk_widget_grab_focus(GTK_WIDGET(agent_term));
+	}
 #if VTE_CHECK_VERSION(0, 70, 0)
 	VtePty *pty = vte_terminal_get_pty(agent_term);
 	if (pty) {
@@ -683,6 +689,26 @@ static void on_new_skill_activate(G_GNUC_UNUSED GtkMenuItem *item,
 	gtk_widget_destroy(dialog);
 }
 
+static void on_internet_search_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+	const gchar *text = (const gchar *)user_data;
+	if (!text || !*text)
+		return;
+
+	gchar *encoded = g_uri_escape_string(text, NULL, TRUE);
+	const gchar *tmpl = search_url ? search_url : DEFAULT_SEARCH_URL;
+	gchar **parts = g_strsplit(tmpl, "%s", 2);
+	gchar *url;
+	if (parts && parts[0] && parts[1])
+		url = g_strconcat(parts[0], encoded, parts[1], NULL);
+	else
+		url = g_strdup(encoded);
+	g_strfreev(parts);
+	g_free(encoded);
+	gtk_show_uri(NULL, url, GDK_CURRENT_TIME, NULL);
+	g_free(url);
+}
+
 static gboolean on_vte_button_press(GtkWidget *widget,
                                     GdkEventButton *event,
                                     G_GNUC_UNUSED gpointer data)
@@ -734,20 +760,30 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 	if (clip_text)
 	{
 		g_strstrip(clip_text);
-		if (clip_looks_like_context_ref(clip_text))
+		if (*clip_text)
 		{
 			gtk_menu_shell_append(GTK_MENU_SHELL(menu),
 			                      gtk_separator_menu_item_new());
 
-			ClipCtxData *ctx = g_new(ClipCtxData, 1);
-			ctx->vte  = vte;
-			ctx->text = g_strdup(clip_text);
+			if (clip_looks_like_context_ref(clip_text))
+			{
+				ClipCtxData *ctx = g_new(ClipCtxData, 1);
+				ctx->vte  = vte;
+				ctx->text = g_strdup(clip_text);
 
-			GtkWidget *ctx_item = gtk_menu_item_new_with_label("Add to Context");
-			g_signal_connect_data(ctx_item, "activate",
-			                      G_CALLBACK(on_add_to_context_activate),
-			                      ctx, on_clip_ctx_data_free, 0);
-			gtk_menu_shell_append(GTK_MENU_SHELL(menu), ctx_item);
+				GtkWidget *ctx_item = gtk_menu_item_new_with_label("Add to Context");
+				g_signal_connect_data(ctx_item, "activate",
+				                      G_CALLBACK(on_add_to_context_activate),
+				                      ctx, on_clip_ctx_data_free, 0);
+				gtk_menu_shell_append(GTK_MENU_SHELL(menu), ctx_item);
+			}
+
+			gchar *search_text = g_strdup(clip_text);
+			GtkWidget *search_item = gtk_menu_item_new_with_label("Internet Search");
+			g_signal_connect_data(search_item, "activate",
+			                      G_CALLBACK(on_internet_search_activate),
+			                      search_text, (GClosureNotify)g_free, 0);
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), search_item);
 		}
 		g_free(clip_text);
 	}
@@ -813,11 +849,19 @@ static void ga_load_config(void)
 			agent_cmd = v;
 		}
 		use_askpass = g_key_file_get_boolean(kf, "agent", "use_askpass", NULL);
+		gchar *su = g_key_file_get_string(kf, "agent", "search_url", NULL);
+		if (su)
+		{
+			g_free(search_url);
+			search_url = su;
+		}
 	}
 	g_key_file_free(kf);
 
 	if (!agent_cmd)
 		agent_cmd = g_strdup(DEFAULT_CMD);
+	if (!search_url)
+		search_url = g_strdup(DEFAULT_SEARCH_URL);
 }
 
 static void ga_save_config(void)
@@ -827,6 +871,7 @@ static void ga_save_config(void)
 
 	g_key_file_set_string(kf,  "agent", "cmd",        agent_cmd ? agent_cmd : DEFAULT_CMD);
 	g_key_file_set_boolean(kf, "agent", "use_askpass", use_askpass);
+	g_key_file_set_string(kf,  "agent", "search_url", search_url ? search_url : DEFAULT_SEARCH_URL);
 	data = g_key_file_to_data(kf, NULL, NULL);
 	utils_write_file(config_file, data);
 	g_free(data);
@@ -837,7 +882,7 @@ static void ga_save_config(void)
 /* ------------------------------------------------------------------ */
 /* Configure dialog                                                    */
 
-typedef struct { GtkWidget *cmd_entry; GtkWidget *askpass_check; } ConfigWidgets;
+typedef struct { GtkWidget *cmd_entry; GtkWidget *askpass_check; GtkWidget *search_url_entry; } ConfigWidgets;
 
 static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
                                   gint response, ConfigWidgets *cw)
@@ -848,6 +893,9 @@ static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
 		g_free(agent_cmd);
 		agent_cmd   = g_strdup(new_cmd);
 		use_askpass = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cw->askpass_check));
+		const gchar *new_url = gtk_entry_get_text(GTK_ENTRY(cw->search_url_entry));
+		g_free(search_url);
+		search_url  = g_strdup(new_url && *new_url ? new_url : DEFAULT_SEARCH_URL);
 		ga_save_config();
 	}
 	g_free(cw);
@@ -874,9 +922,20 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	    "issued by the agent show a graphical password dialog instead of prompting\n"
 	    "on the terminal. This prevents passwords appearing in command strings or history.");
 
-	gtk_box_pack_start(GTK_BOX(vbox), cmd_label,        FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,    FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), cw->askpass_check, FALSE, FALSE, 4);
+	GtkWidget *search_url_label = gtk_label_new("Search URL (%s = query):");
+	gtk_widget_set_halign(search_url_label, GTK_ALIGN_START);
+	cw->search_url_entry = gtk_entry_new();
+	gtk_entry_set_text(GTK_ENTRY(cw->search_url_entry),
+	                   search_url ? search_url : DEFAULT_SEARCH_URL);
+	gtk_widget_set_tooltip_text(cw->search_url_entry,
+	    "URL template for Internet Search. %s is replaced with the URL-encoded query.\n"
+	    "Example: https://www.qwant.com/?q=%s");
+
+	gtk_box_pack_start(GTK_BOX(vbox), cmd_label,           FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,       FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->askpass_check,   FALSE, FALSE, 4);
+	gtk_box_pack_start(GTK_BOX(vbox), search_url_label,    FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->search_url_entry, FALSE, FALSE, 0);
 
 	g_signal_connect(dialog, "response",
 	                 G_CALLBACK(on_configure_response), cw);
@@ -963,6 +1022,8 @@ static void ga_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
 
 	g_free(agent_cmd);
 	agent_cmd = NULL;
+	g_free(search_url);
+	search_url = NULL;
 	g_free(config_file);
 	config_file = NULL;
 }
