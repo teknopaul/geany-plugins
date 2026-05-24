@@ -59,6 +59,12 @@ static const gchar SKILL_TEMPLATE[] =
     "\n"
     "</process>\n";
 
+#define AGENT_TOOLS_CONFIG "agenttools.conf"
+#define AGENT_TOOLS_GROUP  "tools"
+
+static GKeyFile  *agent_tools_config    = NULL;
+static GtkWidget *agent_tools_menu_item = NULL;
+
 
 /* ------------------------------------------------------------------ */
 /* Askpass setup                                                       */
@@ -152,6 +158,281 @@ static void cleanup_askpass(void)
     }
     g_free(askpass_prog);
     askpass_prog = NULL;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Agent command dispatch                                              */
+
+static void ga_send_command(const gchar *cmd)
+{
+	if (!agent_term || !cmd || !*cmd)
+		return;
+	if (tab_index >= 0)
+		gtk_notebook_set_current_page(
+		    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
+		    tab_index);
+#if VTE_CHECK_VERSION(0, 70, 0)
+	VtePty *pty = vte_terminal_get_pty(agent_term);
+	if (pty) {
+		int fd = vte_pty_get_fd(pty);
+		write(fd, "\x15", 1);
+		write(fd, cmd, strlen(cmd));
+		write(fd, "\n", 1);
+	}
+#else
+	vte_terminal_feed_child(agent_term, "\x15", 1);
+	vte_terminal_feed_child(agent_term, cmd, (gssize)strlen(cmd));
+	vte_terminal_feed_child(agent_term, "\n", 1);
+#endif
+}
+
+/* Split expanded command on ';' and send each part to the agent. */
+static void ga_run_agent_cmd(const gchar *expanded)
+{
+	gchar **parts = g_strsplit(expanded, ";", -1);
+	for (gint i = 0; parts[i]; i++) {
+		gchar *part = g_strstrip(parts[i]);
+		if (*part)
+			ga_send_command(part);
+	}
+	g_strfreev(parts);
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Agent tools config                                                  */
+
+static gchar *agent_tools_format_cmd(const gchar *tmpl, const gchar *filepath)
+{
+	GString     *out  = g_string_sized_new(256);
+	gchar       *dir  = g_path_get_dirname(filepath);
+	gchar       *base = g_path_get_basename(filepath);
+	gchar       *root;
+	GeanyApp    *app  = geany->app;
+
+	if (app->project && app->project->base_path && *app->project->base_path)
+		root = g_strdup(app->project->base_path);
+	else
+		root = g_strdup(g_get_home_dir());
+
+	for (const gchar *p = tmpl; *p; p++) {
+		if (*p != '%' || !*(p + 1)) {
+			g_string_append_c(out, *p);
+			continue;
+		}
+		p++;
+		switch (*p) {
+			case 'p': g_string_append(out, filepath); break;
+			case 'd': g_string_append(out, dir);      break;
+			case 'f': g_string_append(out, base);     break;
+			case 'r': g_string_append(out, root);     break;
+			case '%': g_string_append_c(out, '%');    break;
+			default:
+				g_string_append_c(out, '%');
+				g_string_append_c(out, *p);
+		}
+	}
+	g_free(root);
+	g_free(dir);
+	g_free(base);
+	return g_string_free(out, FALSE);
+}
+
+static void on_agent_tool_item_activate(GtkMenuItem *item,
+                                        G_GNUC_UNUSED gpointer data)
+{
+	const gchar   *tmpl = g_object_get_data(G_OBJECT(item), "agent-tmpl");
+	GeanyDocument *doc  = document_get_current();
+	if (!tmpl)
+		return;
+	const gchar *filepath = (doc && doc->file_name) ? doc->file_name : "";
+	gchar *expanded = agent_tools_format_cmd(tmpl, filepath);
+	ga_run_agent_cmd(expanded);
+	g_free(expanded);
+}
+
+static void agent_tools_load(void)
+{
+	if (agent_tools_config)
+		g_key_file_free(agent_tools_config);
+	agent_tools_config = g_key_file_new();
+
+	/* User-level: ~/.config/geany/agenttools.conf */
+	gchar *user_path = g_build_filename(geany->app->configdir,
+	                                    AGENT_TOOLS_CONFIG, NULL);
+	g_key_file_load_from_file(agent_tools_config, user_path, G_KEY_FILE_NONE, NULL);
+	g_free(user_path);
+
+	/* Project-level: <project>/config/geany/agenttools.conf — overlays user config */
+	GeanyProject *proj = geany->app->project;
+	if (!proj || !proj->base_path)
+		return;
+
+	gchar *proj_path = g_build_filename(proj->base_path, "config", "geany",
+	                                    AGENT_TOOLS_CONFIG, NULL);
+	GKeyFile *pkf = g_key_file_new();
+	if (g_key_file_load_from_file(pkf, proj_path, G_KEY_FILE_NONE, NULL)) {
+		gsize   ng;
+		gchar **groups = g_key_file_get_groups(pkf, &ng);
+		for (gsize gi = 0; gi < ng; gi++) {
+			gsize   nk;
+			gchar **keys = g_key_file_get_keys(pkf, groups[gi], &nk, NULL);
+			for (gsize ki = 0; ki < nk; ki++) {
+				gchar *val = g_key_file_get_string(pkf, groups[gi], keys[ki], NULL);
+				g_key_file_set_string(agent_tools_config, groups[gi], keys[ki], val);
+				g_free(val);
+			}
+			g_strfreev(keys);
+		}
+		g_strfreev(groups);
+	}
+	g_key_file_free(pkf);
+	g_free(proj_path);
+}
+
+static void agent_tools_menu_populate(const gchar *filepath)
+{
+	if (!agent_tools_menu_item)
+		return;
+
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(agent_tools_menu_item), NULL);
+
+	if (!filepath || !agent_tools_config || !g_str_has_suffix(filepath, ".md") ||
+	    !g_key_file_has_group(agent_tools_config, AGENT_TOOLS_GROUP)) {
+		gtk_widget_set_sensitive(agent_tools_menu_item, FALSE);
+		return;
+	}
+
+	GtkWidget *submenu = gtk_menu_new();
+	gboolean   any     = FALSE;
+
+	for (gint i = 0; ; i++) {
+		gchar *agent_key = g_strdup_printf("agent_%d", i);
+		gchar *tmpl      = g_key_file_get_string(agent_tools_config,
+		                                          AGENT_TOOLS_GROUP, agent_key, NULL);
+		g_free(agent_key);
+		if (!tmpl)
+			break;
+
+		gchar *name_key = g_strdup_printf("name_%d", i);
+		gchar *name     = g_key_file_get_string(agent_tools_config,
+		                                         AGENT_TOOLS_GROUP, name_key, NULL);
+		g_free(name_key);
+
+		GtkWidget *mi = gtk_menu_item_new_with_label(name ? name : tmpl);
+		g_object_set_data_full(G_OBJECT(mi), "agent-tmpl", tmpl, g_free);
+		g_signal_connect(mi, "activate", G_CALLBACK(on_agent_tool_item_activate), NULL);
+		gtk_menu_shell_append(GTK_MENU_SHELL(submenu), mi);
+		gtk_widget_show(mi);
+
+		g_free(name);
+		any = TRUE;
+	}
+
+	if (any) {
+		gtk_menu_item_set_submenu(GTK_MENU_ITEM(agent_tools_menu_item), submenu);
+		gtk_widget_set_sensitive(agent_tools_menu_item, TRUE);
+		gtk_widget_show(submenu);
+	} else {
+		gtk_widget_destroy(submenu);
+		gtk_widget_set_sensitive(agent_tools_menu_item, FALSE);
+	}
+}
+
+static void on_agent_doc_activate(G_GNUC_UNUSED GObject *obj,
+                                   GeanyDocument *doc,
+                                   G_GNUC_UNUSED gpointer data)
+{
+	agent_tools_menu_populate(doc ? doc->file_name : NULL);
+}
+
+static void on_agent_project_open(G_GNUC_UNUSED GObject *obj,
+                                   G_GNUC_UNUSED GKeyFile *config,
+                                   G_GNUC_UNUSED gpointer data)
+{
+	agent_tools_load();
+	GeanyDocument *doc = document_get_current();
+	agent_tools_menu_populate(doc ? doc->file_name : NULL);
+}
+
+static void on_agent_project_close(G_GNUC_UNUSED GObject *obj,
+                                    G_GNUC_UNUSED gpointer data)
+{
+	agent_tools_load();
+	GeanyDocument *doc = document_get_current();
+	agent_tools_menu_populate(doc ? doc->file_name : NULL);
+}
+
+
+/* ------------------------------------------------------------------ */
+/* New Prompt dialog                                                    */
+
+static void on_new_prompt_activate(G_GNUC_UNUSED GtkMenuItem *item,
+                                   G_GNUC_UNUSED gpointer data)
+{
+	GtkWidget *dialog = gtk_dialog_new_with_buttons(
+	    "New Prompt",
+	    GTK_WINDOW(geany_data->main_widgets->window),
+	    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+	    "_Cancel", GTK_RESPONSE_CANCEL,
+	    "_OK",     GTK_RESPONSE_OK,
+	    NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+
+	GtkWidget *entry = gtk_entry_new();
+	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "My Prompt Name");
+
+	GtkWidget *err_label = gtk_label_new("");
+
+	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	gtk_container_set_border_width(GTK_CONTAINER(content_area), 8);
+	gtk_box_pack_start(GTK_BOX(content_area), gtk_label_new("Prompt name:"), FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content_area), entry, FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content_area), err_label, FALSE, FALSE, 2);
+	gtk_widget_show_all(dialog);
+
+	while (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
+	{
+		const gchar *name = gtk_entry_get_text(GTK_ENTRY(entry));
+		if (!name || !*name) {
+			gtk_label_set_text(GTK_LABEL(err_label), "Name cannot be empty.");
+			continue;
+		}
+
+		/* Slugify: lowercase, spaces → underscores */
+		gchar *slug = g_ascii_strdown(name, -1);
+		for (gchar *c = slug; *c; c++) {
+			if (*c == ' ')
+				*c = '_';
+		}
+
+		gchar *base_path;
+		GeanyApp *app = geany->app;
+		if (app->project && app->project->base_path && *app->project->base_path)
+			base_path = g_strdup(app->project->base_path);
+		else
+			base_path = g_strdup(g_get_home_dir());
+
+		gchar *prompts_dir  = g_build_filename(base_path, "ai-prompts", NULL);
+		gchar *filename     = g_strdup_printf("%s.prompt.md", slug);
+		gchar *prompt_path  = g_build_filename(prompts_dir, filename, NULL);
+
+		g_mkdir_with_parents(prompts_dir, 0755);
+		if (!g_file_test(prompt_path, G_FILE_TEST_EXISTS))
+			utils_write_file(prompt_path, "");
+
+		document_open_file(prompt_path, FALSE, NULL, NULL);
+
+		g_free(prompt_path);
+		g_free(filename);
+		g_free(slug);
+		g_free(prompts_dir);
+		g_free(base_path);
+		break;
+	}
+	gtk_widget_destroy(dialog);
 }
 
 
@@ -444,6 +725,10 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 	g_signal_connect(new_skill_item, "activate", G_CALLBACK(on_new_skill_activate), NULL);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), new_skill_item);
 
+	GtkWidget *new_prompt_item = gtk_menu_item_new_with_label("New Prompt");
+	g_signal_connect(new_prompt_item, "activate", G_CALLBACK(on_new_prompt_activate), NULL);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), new_prompt_item);
+
 	GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
 	gchar        *clip_text = gtk_clipboard_wait_for_text(clipboard);
 	if (clip_text)
@@ -622,6 +907,24 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 	running = TRUE;
 	g_idle_add(ga_spawn_idle, NULL);
 
+	/* Agent tools menu */
+	agent_tools_load();
+	agent_tools_menu_item = gtk_menu_item_new_with_label("Agent Tools");
+	gtk_widget_show(agent_tools_menu_item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(geany_data->main_widgets->tools_menu),
+	                      agent_tools_menu_item);
+	GeanyDocument *cur = document_get_current();
+	agent_tools_menu_populate(cur ? cur->file_name : NULL);
+
+	plugin_signal_connect(plugin, geany->object, "document-activate", FALSE,
+	                      G_CALLBACK(on_agent_doc_activate), NULL);
+	plugin_signal_connect(plugin, geany->object, "document-open", FALSE,
+	                      G_CALLBACK(on_agent_doc_activate), NULL);
+	plugin_signal_connect(plugin, geany->object, "project-open", FALSE,
+	                      G_CALLBACK(on_agent_project_open), NULL);
+	plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
+	                      G_CALLBACK(on_agent_project_close), NULL);
+
 	return TRUE;
 }
 
@@ -648,6 +951,15 @@ static void ga_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
 	}
 
 	cleanup_askpass();
+
+	if (agent_tools_menu_item) {
+		gtk_widget_destroy(agent_tools_menu_item);
+		agent_tools_menu_item = NULL;
+	}
+	if (agent_tools_config) {
+		g_key_file_free(agent_tools_config);
+		agent_tools_config = NULL;
+	}
 
 	g_free(agent_cmd);
 	agent_cmd = NULL;
