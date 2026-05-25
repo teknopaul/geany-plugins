@@ -167,6 +167,13 @@ static void cleanup_askpass(void)
 /* ------------------------------------------------------------------ */
 /* Agent command dispatch                                              */
 
+static gboolean grab_agent_focus_idle(G_GNUC_UNUSED gpointer data)
+{
+	if (agent_term)
+		gtk_widget_grab_focus(GTK_WIDGET(agent_term));
+	return G_SOURCE_REMOVE;
+}
+
 static void ga_send_command(const gchar *cmd)
 {
 	if (!agent_term || !cmd || !*cmd)
@@ -176,7 +183,6 @@ static void ga_send_command(const gchar *cmd)
 		gtk_notebook_set_current_page(
 		    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
 		    tab_index);
-		gtk_widget_grab_focus(GTK_WIDGET(agent_term));
 	}
 #if VTE_CHECK_VERSION(0, 70, 0)
 	VtePty *pty = vte_terminal_get_pty(agent_term);
@@ -191,6 +197,9 @@ static void ga_send_command(const gchar *cmd)
 	vte_terminal_feed_child(agent_term, cmd, (gssize)strlen(cmd));
 	vte_terminal_feed_child(agent_term, "\n", 1);
 #endif
+	/* Grab focus after GTK has processed the page-switch events so the
+	 * editor cannot reclaim it when the notebook switch settles. */
+	g_idle_add(grab_agent_focus_idle, NULL);
 }
 
 /* Split expanded command on ';' and send each part to the agent. */
@@ -252,6 +261,9 @@ static void on_agent_tool_item_activate(GtkMenuItem *item,
 	GeanyDocument *doc  = document_get_current();
 	if (!tmpl)
 		return;
+	/* Save the current file first so the agent reads the latest version. */
+	if (doc && doc->file_name)
+		document_save_file(doc, FALSE);
 	const gchar *filepath = (doc && doc->file_name) ? doc->file_name : "";
 	gchar *expanded = agent_tools_format_cmd(tmpl, filepath);
 	ga_run_agent_cmd(expanded);

@@ -28,7 +28,7 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=8
+current_page=11
 FILE_NAME_0=26;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyagent%2Fsrc%2Fskill-md.template;0;4
 FILE_NAME_1=13339;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanycli%2Fsrc%2Fgeanycli.c;0;4
 FILE_NAME_2=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeanycli.prompt.md;0;4
@@ -39,6 +39,8 @@ FILE_NAME_6=36718;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgean
 FILE_NAME_7=1641;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fcompiler_output.prompt.md;0;4
 FILE_NAME_8=733;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fservers.prompt.md;0;4
 FILE_NAME_9=7675;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fservers.plan.md;0;4
+FILE_NAME_10=29391;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fvimode%2Fsrc%2F.deps%2Fviw-keypress.Po;0;4
+FILE_NAME_11=1213;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Ffind-files.prompt.md;0;4
 
 [VTE]
 last_dir=/home/teknopaul
