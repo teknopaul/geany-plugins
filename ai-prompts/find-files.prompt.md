@@ -1,4 +1,4 @@
-# Find File
+ # Find File
 
 Geany has a "Find in Files..." feature but no "Find File" (by name) feature.
 

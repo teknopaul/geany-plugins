@@ -123,6 +123,10 @@ if ENABLE_LIPSUM
 SUBDIRS += lipsum
 endif
 
+if ENABLE_LOCATE
+SUBDIRS += locate
+endif
+
 if ENABLE_LSP
 SUBDIRS += lsp
 endif
