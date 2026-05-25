@@ -467,6 +467,7 @@ typedef struct {
     gboolean  io_done;
     gboolean  child_done;
     gint      exit_status;
+    gchar    *cmd_display;
 } MessagesJob;
 
 static void messages_job_finish(MessagesJob *job)
@@ -492,9 +493,12 @@ static void messages_job_finish(MessagesJob *job)
 
     gboolean ok  = WIFEXITED(job->exit_status) && WEXITSTATUS(job->exit_status) == 0;
     const gchar *dot = ok ? "\xf0\x9f\x9f\xa2" : "\xf0\x9f\x9f\xa5";  /* 🟢 🔴 */
-    msgwin_msg_add_string(ok ? COLOR_BLACK : COLOR_RED, -1, NULL, dot);
+    gchar *summary = g_strdup_printf("%s %s", dot, job->cmd_display ? job->cmd_display : "");
+    msgwin_msg_add_string(ok ? COLOR_BLACK : COLOR_RED, -1, NULL, summary);
+    g_free(summary);
 
     g_string_free(job->output, TRUE);
+    g_free(job->cmd_display);
     g_spawn_close_pid(job->pid);
     g_free(job);
 }
@@ -546,6 +550,7 @@ static void run_in_messages(const gchar *cmd)
     MessagesJob *job = g_new0(MessagesJob, 1);
     job->output      = g_string_new(NULL);
     job->pid         = pid;
+    job->cmd_display = g_strdup(cmd);
 
     GIOChannel *ch = g_io_channel_unix_new(out_fd);
     g_io_channel_set_flags(ch, G_IO_FLAG_NONBLOCK, NULL);
