@@ -464,7 +464,7 @@ static GtkWidget *create_servers_tab(void)
     /* Status column */
     GtkCellRenderer *pr = gtk_cell_renderer_pixbuf_new();
     GtkTreeViewColumn *col_status = gtk_tree_view_column_new_with_attributes(
-        "Status", pr, "pixbuf", COL_STATUS_ICON, NULL);
+        _("Status"), pr, "pixbuf", COL_STATUS_ICON, NULL);
     gtk_tree_view_column_set_sizing(col_status, GTK_TREE_VIEW_COLUMN_FIXED);
     gtk_tree_view_column_set_fixed_width(col_status, 50);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_status);
@@ -472,7 +472,7 @@ static GtkWidget *create_servers_tab(void)
     /* Active (ping) column */
     GtkCellRenderer *pr2 = gtk_cell_renderer_pixbuf_new();
     GtkTreeViewColumn *col_ping = gtk_tree_view_column_new_with_attributes(
-        "Active", pr2, "pixbuf", COL_PING_ICON, NULL);
+        _("Active"), pr2, "pixbuf", COL_PING_ICON, NULL);
     gtk_tree_view_column_set_sizing(col_ping, GTK_TREE_VIEW_COLUMN_FIXED);
     gtk_tree_view_column_set_fixed_width(col_ping, 50);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_ping);
@@ -480,14 +480,14 @@ static GtkWidget *create_servers_tab(void)
     /* Server name column */
     GtkCellRenderer *tr = gtk_cell_renderer_text_new();
     GtkTreeViewColumn *col_name = gtk_tree_view_column_new_with_attributes(
-        "Server", tr, "text", COL_DISPLAY, NULL);
+        _("Server"), tr, "text", COL_DISPLAY, NULL);
     gtk_tree_view_column_set_expand(col_name, TRUE);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_name);
 
     /* Last boot column */
     GtkCellRenderer *tr2 = gtk_cell_renderer_text_new();
     GtkTreeViewColumn *col_boot = gtk_tree_view_column_new_with_attributes(
-        "Last boot", tr2, "text", COL_LAST_BOOT, NULL);
+        _("Last boot"), tr2, "text", COL_LAST_BOOT, NULL);
     gtk_tree_view_column_set_sizing(col_boot, GTK_TREE_VIEW_COLUMN_FIXED);
     gtk_tree_view_column_set_fixed_width(col_boot, 80);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_boot);
@@ -506,13 +506,13 @@ static GtkWidget *create_servers_tab(void)
     gtk_button_box_set_layout(GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_START);
     gtk_box_set_spacing(GTK_BOX(bbox), 4);
 
-    btn_start  = gtk_button_new_with_label("\xe2\x96\xb6 Start");
-    btn_stop   = gtk_button_new_with_label("\xe2\x96\xa0 Stop");
-    btn_reload = gtk_button_new_with_label("\xe2\x86\xbb Reload");
-    btn_ping   = gtk_button_new_with_label("\xe2\x9a\xa1 Ping");
-    btn_logs   = gtk_button_new_with_label("\xf0\x9f\x93\x8b Logs");
+    btn_start  = gtk_button_new_with_label(_("\xe2\x96\xb6 Start"));
+    btn_stop   = gtk_button_new_with_label(_("\xe2\x96\xa0 Stop"));
+    btn_reload = gtk_button_new_with_label(_("\xe2\x86\xbb Reload"));
+    btn_ping   = gtk_button_new_with_label(_("\xe2\x9a\xa1 Ping"));
+    btn_logs   = gtk_button_new_with_label(_("\xf0\x9f\x93\x8b Logs"));
     /* \xf0\x9f\xa7\xbb = 🧻 (matches arse section label style) */
-    btn_kill   = gtk_button_new_with_label("\xf0\x9f\xa7\xbb Kill");
+    btn_kill   = gtk_button_new_with_label(_("\xf0\x9f\xa7\xbb Kill"));
 
     gtk_container_add(GTK_CONTAINER(bbox), btn_start);
     gtk_container_add(GTK_CONTAINER(bbox), btn_stop);

@@ -14,4 +14,27 @@ geanycli terminal tab if available).
 
 Double-tap Shift opens the Find File dialog from anywhere in Geany.
 
-Requirements: mlocate or plocate must be installed on the system.
+Requirements
+------------
+
+mlocate or plocate must be installed on the system.
+
+Known Issues
+------------
+
+None currently known.
+
+Author
+------
+
+teknopaul <teknopaul@gmail.com>
+
+Website
+-------
+
+https://github.com/teknopaul/geany-plugins
+
+Bugs
+----
+
+https://github.com/teknopaul/geany-plugins/issues

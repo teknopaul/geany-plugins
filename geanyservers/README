@@ -41,11 +41,56 @@ Keys per server (N = index):
   on_open_N — action to fire when a Geany project is opened (start/stop/reload)
   on_close_N— action to fire when a Geany project is closed
 
+ARSE — Automatic Recovery of Server Execution
+----------------------------------------------
+
+The [arse] group lists known orphan or stale processes that should not be
+running.  Each entry appears below the server list.  When the Servers tab is
+focused, the check command is run; if it exits 0 (process found) the row turns
+yellow as a warning.  Selecting an arse row and pressing "🧻 Kill" runs the
+kill command to clean up.
+
+Example:
+
+  [arse]
+  arse_0=🧻 stale nginx
+  arse_check_0=pgrep -x nginx
+  arse_kill_0=pkill -x nginx
+
+  arse_1=🧻 stale mock
+  arse_check_1=pgrep -f "node.*mock"
+  arse_kill_1=pkill -f "node.*mock"
+
+Keys per arse entry (N = index):
+  arse_N        — display label shown in the list
+  arse_check_N  — command that exits 0 when stale processes exist
+  arse_kill_N   — command to kill those processes
+
 Requirements
 ------------
 
   * Geany 2.1+
   * GTK 3
+
+Known Issues
+------------
+
+None currently known.
+
+Author
+------
+
+teknopaul <teknopaul@gmail.com>
+
+Website
+-------
+
+https://github.com/teknopaul/geany-plugins
+
+Bugs
+----
+
+https://github.com/teknopaul/geany-plugins/issues
 
 License
 -------

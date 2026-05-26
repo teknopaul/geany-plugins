@@ -17,3 +17,19 @@ Configuration
 Open Edit → Plugin Preferences → Agent to change the command.
 The setting is stored in:
   ~/.config/geany/plugins/geanyagent/geanyagent.conf
+
+Known Issues
+------------
+None currently known.
+
+Author
+------
+teknopaul <teknopaul@gmail.com>
+
+Website
+-------
+https://github.com/teknopaul/geany-plugins
+
+Bugs
+----
+https://github.com/teknopaul/geany-plugins/issues

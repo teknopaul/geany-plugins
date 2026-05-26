@@ -38,6 +38,22 @@ Requirements
 - VTE >= 0.48 (vte-2.91)
 - Geany >= 2.1
 
+Known Issues
+------------
+None currently known.
+
+Author
+------
+teknopaul <teknopaul@gmail.com>
+
+Website
+-------
+https://github.com/teknopaul/geany-plugins
+
+Bugs
+----
+https://github.com/teknopaul/geany-plugins/issues
+
 License
 -------
 GPL-2.0-or-later

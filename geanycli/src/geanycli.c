@@ -35,6 +35,8 @@
 #endif
 
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
 #include <sys/wait.h>
 #include <glib.h>
 #include <gtk/gtk.h>
@@ -58,6 +60,7 @@ typedef struct {
     VteTerminal *vte;
     GtkWidget   *hbox;   /* terminal + scrollbar; used as the notebook page */
     GtkWidget   *label;  /* GtkLabel in the tab header, for renaming */
+    GPid         child_pid; /* PID of the shell; 0 when no child is running */
 } TermTab;
 
 /* Carries (tab, cmd) across the async spawn boundary */
@@ -97,6 +100,7 @@ static void on_spawn_ready(VteTerminal *vte,
                            gpointer     user_data)
 {
     SpawnData *sd = user_data;
+    sd->tab->child_pid = error ? 0 : pid;
     if (!error && sd->cmd && *sd->cmd)
     {
         vte_terminal_feed_child(VTE_TERMINAL(vte), "\x15", 1);
@@ -148,6 +152,7 @@ static void on_child_exited(VteTerminal *vte,
     if (!active)
         return;
     TermTab *tab = user_data;
+    tab->child_pid = 0;
     vte_terminal_feed(vte, "\r\n[process exited — restarting shell]\r\n", -1);
     spawn_shell(tab, NULL);
 }
@@ -195,11 +200,11 @@ static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer use
         return;
 
     GtkWidget *dialog = gtk_dialog_new_with_buttons(
-        "Rename Tab",
+        _("Rename Tab"),
         GTK_WINDOW(geany_data->main_widgets->window),
         GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-        "Cancel", GTK_RESPONSE_CANCEL,
-        "Rename", GTK_RESPONSE_ACCEPT,
+        _("_Cancel"), GTK_RESPONSE_CANCEL,
+        _("_Rename"), GTK_RESPONSE_ACCEPT,
         NULL);
     gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
 
@@ -231,15 +236,15 @@ static gboolean on_vte_button_press(GtkWidget *widget,
     TermTab     *tab  = data;
     GtkWidget   *menu = gtk_menu_new();
 
-    GtkWidget *copy_item = gtk_menu_item_new_with_label("Copy");
+    GtkWidget *copy_item = gtk_menu_item_new_with_label(_("Copy"));
     g_signal_connect(copy_item, "activate", G_CALLBACK(on_copy_activate), vte);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), copy_item);
 
-    GtkWidget *paste_item = gtk_menu_item_new_with_label("Paste");
+    GtkWidget *paste_item = gtk_menu_item_new_with_label(_("Paste"));
     g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
 
-    GtkWidget *rename_item = gtk_menu_item_new_with_label("Rename tab\xe2\x80\xa6");
+    GtkWidget *rename_item = gtk_menu_item_new_with_label(_("Rename tab\xe2\x80\xa6"));
     g_signal_connect(rename_item, "activate", G_CALLBACK(on_rename_tab_activate), tab);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), rename_item);
 
@@ -252,6 +257,13 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 
 /* ------------------------------------------------------------------ */
 /* Tab creation                                                        */
+
+static void on_stop_btn_clicked(G_GNUC_UNUSED GtkButton *btn, gpointer user_data)
+{
+    TermTab *tab = user_data;
+    if (tab->child_pid > 0)
+        kill(-getpgid((pid_t)tab->child_pid), SIGINT);
+}
 
 /* name=NULL → auto-label "Term N"; non-NULL → use that string as tab label. */
 static TermTab *create_tab(const gchar *cmd, const gchar *name)
@@ -304,7 +316,17 @@ static TermTab *create_tab(const gchar *cmd, const gchar *name)
     g_signal_connect(close_btn, "clicked",
                      G_CALLBACK(on_close_btn_clicked), tab);
 
+    GtkWidget *stop_btn = gtk_button_new();
+    GtkWidget *stop_img = gtk_image_new_from_icon_name("process-stop-symbolic",
+                                                        GTK_ICON_SIZE_MENU);
+    gtk_button_set_image(GTK_BUTTON(stop_btn), stop_img);
+    gtk_button_set_relief(GTK_BUTTON(stop_btn), GTK_RELIEF_NONE);
+    gtk_button_set_focus_on_click(GTK_BUTTON(stop_btn), FALSE);
+    g_signal_connect(stop_btn, "clicked",
+                     G_CALLBACK(on_stop_btn_clicked), tab);
+
     gtk_box_pack_start(GTK_BOX(lbl_hbox), label, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(lbl_hbox), stop_btn, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(lbl_hbox), close_btn, FALSE, FALSE, 0);
     gtk_widget_show_all(lbl_hbox);
 
@@ -952,7 +974,7 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     GtkWidget *add_btn = gtk_button_new_from_icon_name("list-add-symbolic",
                                                         GTK_ICON_SIZE_SMALL_TOOLBAR);
     gtk_button_set_relief(GTK_BUTTON(add_btn), GTK_RELIEF_NONE);
-    gtk_widget_set_tooltip_text(add_btn, "New terminal tab");
+    gtk_widget_set_tooltip_text(add_btn, _("New terminal tab"));
     g_signal_connect(add_btn, "clicked", G_CALLBACK(on_new_tab_clicked), NULL);
     gtk_widget_show(add_btn);
     gtk_notebook_set_action_widget(term_nb, add_btn, GTK_PACK_END);
@@ -970,7 +992,7 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 
     /* File-type tools menu */
     tools_config_load();
-    tools_menu_item = gtk_menu_item_new_with_label("File Tools");
+    tools_menu_item = gtk_menu_item_new_with_label(_("File Tools"));
     gtk_widget_show(tools_menu_item);
     gtk_menu_shell_append(GTK_MENU_SHELL(geany_data->main_widgets->tools_menu),
                           tools_menu_item);

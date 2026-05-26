@@ -123,7 +123,7 @@ static void result_none(const gchar *query)
 static void result_one(const gchar *path)
 {
     if (!locate_dialog) return;
-    gtk_label_set_text(GTK_LABEL(label_status), "Press Enter to open:");
+    gtk_label_set_text(GTK_LABEL(label_status), _("Press Enter to open:"));
     gtk_label_set_text(GTK_LABEL(label_result), path);
     gtk_widget_show(label_result);
     g_free(single_result);
@@ -301,11 +301,11 @@ static void locate_dialog_show(void)
     }
 
     locate_dialog = gtk_dialog_new_with_buttons(
-        "Find File",
+        _("Find File"),
         GTK_WINDOW(geany_data->main_widgets->window),
         GTK_DIALOG_DESTROY_WITH_PARENT,
-        "_Cancel", GTK_RESPONSE_CANCEL,
-        "_Find",   GTK_RESPONSE_OK,
+        _("_Cancel"), GTK_RESPONSE_CANCEL,
+        _("_Find"),   GTK_RESPONSE_OK,
         NULL);
 
     gtk_dialog_set_default_response(GTK_DIALOG(locate_dialog), GTK_RESPONSE_OK);
@@ -317,7 +317,7 @@ static void locate_dialog_show(void)
 
     /* Search row */
     GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget *lbl  = gtk_label_new("Search:");
+    GtkWidget *lbl  = gtk_label_new(_("Search:"));
     entry_query     = gtk_entry_new();
     gtk_entry_set_activates_default(GTK_ENTRY(entry_query), TRUE);
     gtk_box_pack_start(GTK_BOX(hbox), lbl,        FALSE, FALSE, 0);
@@ -325,7 +325,7 @@ static void locate_dialog_show(void)
     gtk_box_pack_start(GTK_BOX(ca),   hbox,        FALSE, FALSE, 0);
 
     /* Case toggle */
-    check_case = gtk_check_button_new_with_label("Case sensitive");
+    check_case = gtk_check_button_new_with_label(_("Case sensitive"));
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check_case), FALSE);
     gtk_box_pack_start(GTK_BOX(ca), check_case, FALSE, FALSE, 0);
 
@@ -409,7 +409,7 @@ static gboolean gl_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     geany_plugin = plugin;
     geany_data   = plugin->geany_data;
 
-    menu_item_find = gtk_menu_item_new_with_label("Find File");
+    menu_item_find = gtk_menu_item_new_with_label(_("Find File"));
     gtk_widget_show(menu_item_find);
     gtk_menu_shell_append(GTK_MENU_SHELL(geany_data->main_widgets->tools_menu),
                           menu_item_find);
@@ -428,7 +428,7 @@ static gboolean gl_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 
     key_group = plugin_set_key_group(geany_plugin, "locate", KB_COUNT, NULL);
     keybindings_set_item(key_group, KB_FIND_FILE, kb_find_file,
-                         0, 0, "find_file", "Find File", menu_item_find);
+                         0, 0, "find_file", _("Find File"), menu_item_find);
 
     return TRUE;
 }

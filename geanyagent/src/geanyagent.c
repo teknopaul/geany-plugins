@@ -390,11 +390,11 @@ static void on_new_prompt_activate(G_GNUC_UNUSED GtkMenuItem *item,
                                    G_GNUC_UNUSED gpointer data)
 {
 	GtkWidget *dialog = gtk_dialog_new_with_buttons(
-	    "New Prompt",
+	    _("New Prompt"),
 	    GTK_WINDOW(geany_data->main_widgets->window),
 	    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-	    "_Cancel", GTK_RESPONSE_CANCEL,
-	    "_OK",     GTK_RESPONSE_OK,
+	    _("_Cancel"), GTK_RESPONSE_CANCEL,
+	    _("_OK"),     GTK_RESPONSE_OK,
 	    NULL);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
 
@@ -406,7 +406,7 @@ static void on_new_prompt_activate(G_GNUC_UNUSED GtkMenuItem *item,
 
 	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	gtk_container_set_border_width(GTK_CONTAINER(content_area), 8);
-	gtk_box_pack_start(GTK_BOX(content_area), gtk_label_new("Prompt name:"), FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content_area), gtk_label_new(_("Prompt name:")), FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(content_area), entry, FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(content_area), err_label, FALSE, FALSE, 2);
 	gtk_widget_show_all(dialog);
@@ -415,7 +415,7 @@ static void on_new_prompt_activate(G_GNUC_UNUSED GtkMenuItem *item,
 	{
 		const gchar *name = gtk_entry_get_text(GTK_ENTRY(entry));
 		if (!name || !*name) {
-			gtk_label_set_text(GTK_LABEL(err_label), "Name cannot be empty.");
+			gtk_label_set_text(GTK_LABEL(err_label), _("Name cannot be empty."));
 			continue;
 		}
 
@@ -609,11 +609,11 @@ static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item,
 		return;
 
 	GtkWidget *dialog = gtk_dialog_new_with_buttons(
-	    "Rename Tab",
+	    _("Rename Tab"),
 	    GTK_WINDOW(geany_data->main_widgets->window),
 	    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-	    "_Cancel", GTK_RESPONSE_CANCEL,
-	    "_OK",     GTK_RESPONSE_OK,
+	    _("_Cancel"), GTK_RESPONSE_CANCEL,
+	    _("_OK"),     GTK_RESPONSE_OK,
 	    NULL);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
 
@@ -623,7 +623,7 @@ static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item,
 
 	GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	gtk_container_set_border_width(GTK_CONTAINER(content), 8);
-	gtk_box_pack_start(GTK_BOX(content), gtk_label_new("Tab title:"), FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content), gtk_label_new(_("Tab title:")), FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(content), entry, FALSE, FALSE, 2);
 	gtk_widget_show_all(dialog);
 
@@ -640,11 +640,11 @@ static void on_new_skill_activate(G_GNUC_UNUSED GtkMenuItem *item,
                                   G_GNUC_UNUSED gpointer data)
 {
 	GtkWidget *dialog = gtk_dialog_new_with_buttons(
-	    "New Skill",
+	    _("New Skill"),
 	    GTK_WINDOW(geany_data->main_widgets->window),
 	    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-	    "_Cancel", GTK_RESPONSE_CANCEL,
-	    "_OK",     GTK_RESPONSE_OK,
+	    _("_Cancel"), GTK_RESPONSE_CANCEL,
+	    _("_OK"),     GTK_RESPONSE_OK,
 	    NULL);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
 
@@ -656,7 +656,7 @@ static void on_new_skill_activate(G_GNUC_UNUSED GtkMenuItem *item,
 
 	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	gtk_container_set_border_width(GTK_CONTAINER(content_area), 8);
-	gtk_box_pack_start(GTK_BOX(content_area), gtk_label_new("Skill name (no spaces):"), FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(content_area), gtk_label_new(_("Skill name (no spaces):")), FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(content_area), entry, FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(content_area), err_label, FALSE, FALSE, 2);
 	gtk_widget_show_all(dialog);
@@ -666,12 +666,12 @@ static void on_new_skill_activate(G_GNUC_UNUSED GtkMenuItem *item,
 		const gchar *name = gtk_entry_get_text(GTK_ENTRY(entry));
 		if (!name || !*name)
 		{
-			gtk_label_set_text(GTK_LABEL(err_label), "Name cannot be empty.");
+			gtk_label_set_text(GTK_LABEL(err_label), _("Name cannot be empty."));
 			continue;
 		}
 		if (strchr(name, ' '))
 		{
-			gtk_label_set_text(GTK_LABEL(err_label), "Name cannot contain spaces.");
+			gtk_label_set_text(GTK_LABEL(err_label), _("Name cannot contain spaces."));
 			continue;
 		}
 
@@ -744,26 +744,26 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 
 	GtkWidget *menu = gtk_menu_new();
 
-	GtkWidget *copy_item = gtk_menu_item_new_with_label("Copy");
+	GtkWidget *copy_item = gtk_menu_item_new_with_label(_("Copy"));
 	gtk_widget_set_sensitive(copy_item, has_sel);
 	g_signal_connect(copy_item, "activate", G_CALLBACK(on_copy_activate), vte);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), copy_item);
 
-	GtkWidget *paste_item = gtk_menu_item_new_with_label("Paste");
+	GtkWidget *paste_item = gtk_menu_item_new_with_label(_("Paste"));
 	g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
 
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 
-	GtkWidget *rename_item = gtk_menu_item_new_with_label("Rename Tab");
+	GtkWidget *rename_item = gtk_menu_item_new_with_label(_("Rename Tab"));
 	g_signal_connect(rename_item, "activate", G_CALLBACK(on_rename_tab_activate), NULL);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), rename_item);
 
-	GtkWidget *new_skill_item = gtk_menu_item_new_with_label("New Skill");
+	GtkWidget *new_skill_item = gtk_menu_item_new_with_label(_("New Skill"));
 	g_signal_connect(new_skill_item, "activate", G_CALLBACK(on_new_skill_activate), NULL);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), new_skill_item);
 
-	GtkWidget *new_prompt_item = gtk_menu_item_new_with_label("New Prompt");
+	GtkWidget *new_prompt_item = gtk_menu_item_new_with_label(_("New Prompt"));
 	g_signal_connect(new_prompt_item, "activate", G_CALLBACK(on_new_prompt_activate), NULL);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), new_prompt_item);
 
@@ -783,7 +783,7 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 				ctx->vte  = vte;
 				ctx->text = g_strdup(clip_text);
 
-				GtkWidget *ctx_item = gtk_menu_item_new_with_label("Add to Context");
+				GtkWidget *ctx_item = gtk_menu_item_new_with_label(_("Add to Context"));
 				g_signal_connect_data(ctx_item, "activate",
 				                      G_CALLBACK(on_add_to_context_activate),
 				                      ctx, on_clip_ctx_data_free, 0);
@@ -791,7 +791,7 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 			}
 
 			gchar *search_text = g_strdup(clip_text);
-			GtkWidget *search_item = gtk_menu_item_new_with_label("Internet Search");
+			GtkWidget *search_item = gtk_menu_item_new_with_label(_("Internet Search"));
 			g_signal_connect_data(search_item, "activate",
 			                      G_CALLBACK(on_internet_search_activate),
 			                      search_text, (GClosureNotify)g_free, 0);
@@ -920,21 +920,21 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	ConfigWidgets *cw   = g_new0(ConfigWidgets, 1);
 	GtkWidget     *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
 
-	GtkWidget *cmd_label = gtk_label_new("Agent command:");
+	GtkWidget *cmd_label = gtk_label_new(_("Agent command:"));
 	gtk_widget_set_halign(cmd_label, GTK_ALIGN_START);
 	cw->cmd_entry = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),
 	                   agent_cmd ? agent_cmd : DEFAULT_CMD);
 
 	cw->askpass_check = gtk_check_button_new_with_label(
-	    "Intercept sudo with GUI password dialog (Linux only, requires zenity or ssh-askpass)");
+	    _("Intercept sudo with GUI password dialog (Linux only, requires zenity or ssh-askpass)"));
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cw->askpass_check), use_askpass);
 	gtk_widget_set_tooltip_text(cw->askpass_check,
 	    "When enabled, a sudo wrapper is injected into PATH so that sudo commands\n"
 	    "issued by the agent show a graphical password dialog instead of prompting\n"
 	    "on the terminal. This prevents passwords appearing in command strings or history.");
 
-	GtkWidget *search_url_label = gtk_label_new("Search URL (%s = query):");
+	GtkWidget *search_url_label = gtk_label_new(_("Search URL (%s = query):"));
 	gtk_widget_set_halign(search_url_label, GTK_ALIGN_START);
 	cw->search_url_entry = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(cw->search_url_entry),
@@ -980,7 +980,7 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 
 	/* Agent tools menu */
 	agent_tools_load();
-	agent_tools_menu_item = gtk_menu_item_new_with_label("Agent Tools");
+	agent_tools_menu_item = gtk_menu_item_new_with_label(_("Agent Tools"));
 	gtk_widget_show(agent_tools_menu_item);
 	gtk_menu_shell_append(GTK_MENU_SHELL(geany_data->main_widgets->tools_menu),
 	                      agent_tools_menu_item);
