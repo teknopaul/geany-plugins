@@ -602,6 +602,63 @@ static gboolean clip_looks_like_context_ref(const gchar *text)
 	return len < 255 && !strchr(text, ' ') && !strchr(text, '\n');
 }
 
+/* Intercept DnD drops on the agent VTE: prepend '@' so the path is added
+ * to the agent's context.  Runs before VTE's class-level handler. */
+static void
+on_agent_vte_drag_data_received(GtkWidget *widget, GdkDragContext *context,
+    G_GNUC_UNUSED gint x, G_GNUC_UNUSED gint y,
+    GtkSelectionData *data, G_GNUC_UNUSED guint info, guint time,
+    G_GNUC_UNUSED gpointer user_data)
+{
+    GdkAtom target        = gtk_selection_data_get_target(data);
+    GdkAtom text_plain    = gdk_atom_intern_static_string("text/plain");
+    GdkAtom text_uri_list = gdk_atom_intern_static_string("text/uri-list");
+    gchar  *path          = NULL;
+
+    if (target == text_plain)
+    {
+        const guchar *raw = gtk_selection_data_get_data(data);
+        gint len = gtk_selection_data_get_length(data);
+        if (raw && len > 0)
+        {
+            path = g_strndup((const gchar *)raw, len);
+            g_strstrip(path);
+        }
+        if (!path || !clip_looks_like_context_ref(path))
+        {
+            g_free(path);
+            return; /* not a path — let VTE handle normally */
+        }
+    }
+    else if (target == text_uri_list)
+    {
+        gchar **uris = gtk_selection_data_get_uris(data);
+        if (uris && uris[0])
+            path = g_filename_from_uri(uris[0], NULL, NULL);
+        g_strfreev(uris);
+        if (!path)
+            return; /* not a local file — let VTE handle */
+    }
+    else
+        return;
+
+    gchar *payload = g_strconcat("@", path, NULL);
+    gsize  plen    = strlen(payload);
+    g_free(path);
+
+#if VTE_CHECK_VERSION(0, 70, 0)
+    VtePty *pty = vte_terminal_get_pty(agent_term);
+    if (pty)
+        write(vte_pty_get_fd(pty), payload, plen);
+#else
+    vte_terminal_feed_child(agent_term, payload, (gssize)plen);
+#endif
+    g_free(payload);
+
+    gtk_drag_finish(context, TRUE, FALSE, time);
+    g_signal_stop_emission_by_name(widget, "drag-data-received");
+}
+
 static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item,
                                    G_GNUC_UNUSED gpointer data)
 {
@@ -834,6 +891,10 @@ static void create_agent_tab(void)
 	                 G_CALLBACK(on_child_exited), NULL);
 	g_signal_connect(vte, "button-press-event",
 	                 G_CALLBACK(on_vte_button_press), NULL);
+	/* Connect before VTE's class handler so we can intercept file-path drops
+	 * and feed them as @path context references instead of pasting raw text. */
+	g_signal_connect(vte, "drag-data-received",
+	                 G_CALLBACK(on_agent_vte_drag_data_received), NULL);
 
 	gtk_widget_show_all(agent_hbox);
 

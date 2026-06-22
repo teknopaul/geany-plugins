@@ -737,6 +737,8 @@ LSP_LIBS
 LSP_CFLAGS
 SYSTEM_JSONRPC_LIBS
 SYSTEM_JSONRPC_CFLAGS
+ENABLE_LOCATE_FALSE
+ENABLE_LOCATE_TRUE
 ENABLE_LIPSUM_FALSE
 ENABLE_LIPSUM_TRUE
 ENABLE_LINEOPERATIONS_FALSE
@@ -749,6 +751,8 @@ GITCHANGEBAR_LIBS
 GITCHANGEBAR_CFLAGS
 ENABLE_GEANYSERVERS_FALSE
 ENABLE_GEANYSERVERS_TRUE
+ENABLE_GEANYCONTROL_FALSE
+ENABLE_GEANYCONTROL_TRUE
 ENABLE_GEANYCLI_FALSE
 ENABLE_GEANYCLI_TRUE
 ENABLE_GEANYAGENT_FALSE
@@ -1033,11 +1037,13 @@ enable_largefile
 enable_geniuspaste
 enable_geanyagent
 enable_geanycli
+enable_geanycontrol
 enable_geanyservers
 enable_gitchangebar
 enable_keyrecord
 enable_lineoperations
 enable_lipsum
+enable_locate
 enable_lsp
 enable_system_jsonrpc
 enable_markdown
@@ -1801,12 +1807,14 @@ Optional Features:
   --disable-geniuspaste   Do not build the GeniusPaste plugin
   --disable-geanyagent    Do not build the Geanyagent plugin
   --disable-geanycli      Do not build the Geanycli plugin
+  --disable-geanycontrol  Do not build the Geanycontrol plugin
   --disable-geanyservers  Do not build the Geanyservers plugin
   --disable-gitchangebar  Do not build the GitChangeBar plugin
   --disable-keyrecord     Do not build the Keyrecord plugin
   --disable-lineoperations
                           Do not build the LineOperations plugin
   --disable-lipsum        Do not build the Lipsum plugin
+  --disable-locate        Do not build the Locate plugin
   --disable-lsp           Do not build the LSP plugin
   --enable-system-jsonrpc Force using system json-glib and jsonrpc-glib
                           libraries for the LSP plugin. [[default=no]]
@@ -21602,6 +21610,46 @@ fi
 
 
 
+    # Check whether --enable-geanycontrol was given.
+if test ${enable_geanycontrol+y}
+then :
+  enableval=$enable_geanycontrol; enable_geanycontrol=$enableval
+else $as_nop
+  case $gp_enable_all in #(
+  no) :
+    enable_geanycontrol=no ;; #(
+  yes) :
+    enable_geanycontrol=yes ;; #(
+  *) :
+    enable_geanycontrol=auto ;;
+esac
+fi
+
+
+
+        if test "$enable_geanycontrol" = "auto"; then
+        enable_geanycontrol=yes
+    fi
+     if test "$enable_geanycontrol" = yes; then
+  ENABLE_GEANYCONTROL_TRUE=
+  ENABLE_GEANYCONTROL_FALSE='#'
+else
+  ENABLE_GEANYCONTROL_TRUE='#'
+  ENABLE_GEANYCONTROL_FALSE=
+fi
+
+
+    plugins_statusmsg="${plugins_statusmsg}Geanycontrol:$enable_geanycontrol
+"
+
+
+    ac_config_files="$ac_config_files geanycontrol/Makefile geanycontrol/src/Makefile"
+
+
+
+
+
+
     # Check whether --enable-geanyservers was given.
 if test ${enable_geanyservers+y}
 then :
@@ -22042,6 +22090,46 @@ fi
 
 
     ac_config_files="$ac_config_files lipsum/Makefile lipsum/src/Makefile"
+
+
+
+
+
+
+    # Check whether --enable-locate was given.
+if test ${enable_locate+y}
+then :
+  enableval=$enable_locate; enable_locate=$enableval
+else $as_nop
+  case $gp_enable_all in #(
+  no) :
+    enable_locate=no ;; #(
+  yes) :
+    enable_locate=yes ;; #(
+  *) :
+    enable_locate=auto ;;
+esac
+fi
+
+
+
+        if test "$enable_locate" = "auto"; then
+        enable_locate=yes
+    fi
+     if test "$enable_locate" = yes; then
+  ENABLE_LOCATE_TRUE=
+  ENABLE_LOCATE_FALSE='#'
+else
+  ENABLE_LOCATE_TRUE='#'
+  ENABLE_LOCATE_FALSE=
+fi
+
+
+    plugins_statusmsg="${plugins_statusmsg}Locate:$enable_locate
+"
+
+
+    ac_config_files="$ac_config_files locate/Makefile locate/src/Makefile"
 
 
 
@@ -25869,6 +25957,10 @@ if test -z "${ENABLE_GEANYCLI_TRUE}" && test -z "${ENABLE_GEANYCLI_FALSE}"; then
   as_fn_error $? "conditional \"ENABLE_GEANYCLI\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
+if test -z "${ENABLE_GEANYCONTROL_TRUE}" && test -z "${ENABLE_GEANYCONTROL_FALSE}"; then
+  as_fn_error $? "conditional \"ENABLE_GEANYCONTROL\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
 if test -z "${ENABLE_GEANYSERVERS_TRUE}" && test -z "${ENABLE_GEANYSERVERS_FALSE}"; then
   as_fn_error $? "conditional \"ENABLE_GEANYSERVERS\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
@@ -25887,6 +25979,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${ENABLE_LIPSUM_TRUE}" && test -z "${ENABLE_LIPSUM_FALSE}"; then
   as_fn_error $? "conditional \"ENABLE_LIPSUM\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${ENABLE_LOCATE_TRUE}" && test -z "${ENABLE_LOCATE_FALSE}"; then
+  as_fn_error $? "conditional \"ENABLE_LOCATE\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${ENABLE_BUILTIN_JSONRPC_TRUE}" && test -z "${ENABLE_BUILTIN_JSONRPC_FALSE}"; then
@@ -26929,6 +27025,8 @@ do
     "geanyagent/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyagent/src/Makefile" ;;
     "geanycli/Makefile") CONFIG_FILES="$CONFIG_FILES geanycli/Makefile" ;;
     "geanycli/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanycli/src/Makefile" ;;
+    "geanycontrol/Makefile") CONFIG_FILES="$CONFIG_FILES geanycontrol/Makefile" ;;
+    "geanycontrol/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanycontrol/src/Makefile" ;;
     "geanyservers/Makefile") CONFIG_FILES="$CONFIG_FILES geanyservers/Makefile" ;;
     "geanyservers/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyservers/src/Makefile" ;;
     "git-changebar/Makefile") CONFIG_FILES="$CONFIG_FILES git-changebar/Makefile" ;;
@@ -26940,6 +27038,8 @@ do
     "lineoperations/src/Makefile") CONFIG_FILES="$CONFIG_FILES lineoperations/src/Makefile" ;;
     "lipsum/Makefile") CONFIG_FILES="$CONFIG_FILES lipsum/Makefile" ;;
     "lipsum/src/Makefile") CONFIG_FILES="$CONFIG_FILES lipsum/src/Makefile" ;;
+    "locate/Makefile") CONFIG_FILES="$CONFIG_FILES locate/Makefile" ;;
+    "locate/src/Makefile") CONFIG_FILES="$CONFIG_FILES locate/src/Makefile" ;;
     "lsp/Makefile") CONFIG_FILES="$CONFIG_FILES lsp/Makefile" ;;
     "lsp/deps/Makefile") CONFIG_FILES="$CONFIG_FILES lsp/deps/Makefile" ;;
     "lsp/src/Makefile") CONFIG_FILES="$CONFIG_FILES lsp/src/Makefile" ;;

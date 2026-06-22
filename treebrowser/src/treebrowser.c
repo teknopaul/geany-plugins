@@ -385,6 +385,11 @@ check_hidden(const gchar *filename)
 #else
 	if (base_name[0] == '.')
 	{
+		if (g_strcmp0(base_name, ".claude") == 0)
+		{
+			g_free(base_name);
+			return FALSE;
+		}
 		g_free(base_name);
 		return TRUE;
 	}
@@ -618,6 +623,28 @@ treebrowser_browse(gchar *directory, gpointer parent)
 						-1);
 	}
 
+	if (!has_parent)
+	{
+		/* Prepend a "." node so the root directory is right-clickable (New File/Folder etc.) */
+		GtkTreeIter root_iter;
+		GdkPixbuf *root_icon = NULL;
+		gchar *root_uri = g_strndup(directory, strlen(directory) - 1);
+#if GTK_CHECK_VERSION(3, 10, 0)
+		root_icon = CONFIG_SHOW_ICONS ? utils_pixbuf_from_name("folder") : NULL;
+#else
+		root_icon = CONFIG_SHOW_ICONS ? utils_pixbuf_from_stock(GTK_STOCK_DIRECTORY) : NULL;
+#endif
+		gtk_tree_store_prepend(treestore, &root_iter, NULL);
+		gtk_tree_store_set(treestore, &root_iter,
+						TREEBROWSER_COLUMN_ICON,	root_icon,
+						TREEBROWSER_COLUMN_NAME,	".",
+						TREEBROWSER_COLUMN_URI,		root_uri,
+						-1);
+		if (root_icon)
+			g_object_unref(root_icon);
+		g_free(root_uri);
+	}
+
 	if (has_parent)
 	{
 		if (expanded)
@@ -793,10 +820,8 @@ fs_remove(gchar *root, gboolean delete_root)
 		if (!dir)
 		{
 			if (delete_root)
-			{
 				g_remove(root);
-			}
-			else return;
+			return;
 		}
 
 		name = g_dir_read_name (dir);
@@ -1195,21 +1220,56 @@ on_menu_rename(GtkMenuItem *menuitem, gpointer *user_data)
 static void
 on_menu_delete(GtkMenuItem *menuitem, gpointer *user_data)
 {
-
-	GtkTreeSelection 	*selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(treeview));
-	GtkTreeIter 		iter, iter_parent;
-	GtkTreeModel 		*model;
-	gchar 				*uri, *uri_parent;
+	GtkTreeSelection	*selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(treeview));
+	GtkTreeIter		 iter, iter_parent;
+	GtkTreeModel		*model;
+	gchar			*uri, *uri_parent;
+	gboolean		 is_dir, confirmed;
 
 	if (! gtk_tree_selection_get_selected(selection, &model, &iter))
 		return;
 
 	gtk_tree_model_get(model, &iter, TREEBROWSER_COLUMN_URI, &uri, -1);
 
-	if (dialogs_show_question(_("Do you really want to delete '%s' ?"), uri))
+	is_dir = g_file_test(uri, G_FILE_TEST_IS_DIR);
+
+	if (is_dir)
 	{
-		if (CONFIG_ON_DELETE_CLOSE_FILE && !g_file_test(uri, G_FILE_TEST_IS_DIR))
-			document_close(document_find_by_filename(uri));
+		GDir    *dir      = g_dir_open(uri, 0, NULL);
+		gboolean is_empty = dir && g_dir_read_name(dir) == NULL;
+		if (dir)
+			g_dir_close(dir);
+
+		if (is_empty)
+			confirmed = dialogs_show_question(_("Delete empty folder '%s'?"), uri);
+		else
+			confirmed = dialogs_show_question(
+				_("'%s' is not empty.\nDelete the folder and all its contents?"), uri);
+	}
+	else
+		confirmed = dialogs_show_question(_("Do you really want to delete '%s'?"), uri);
+
+	if (confirmed)
+	{
+		if (CONFIG_ON_DELETE_CLOSE_FILE)
+		{
+			if (is_dir)
+			{
+				guint i;
+				gsize uri_len = strlen(uri);
+				for (i = 0; i < GEANY(documents_array)->len; i++)
+				{
+					GeanyDocument *doc = documents[i];
+					if (doc->is_valid && doc->file_name &&
+					    strlen(doc->file_name) > uri_len &&
+					    strncmp(uri, doc->file_name, uri_len) == 0 &&
+					    doc->file_name[uri_len] == G_DIR_SEPARATOR)
+						document_close(doc);
+				}
+			}
+			else
+				document_close(document_find_by_filename(uri));
+		}
 
 		uri_parent = g_path_get_dirname(uri);
 		fs_remove(uri, TRUE);
@@ -1477,6 +1537,66 @@ on_menu_show_bars(GtkMenuItem *menuitem, gpointer *user_data)
 	showbars(gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(menuitem)));
 }
 
+static void
+on_menu_paste_file(G_GNUC_UNUSED GtkMenuItem *menuitem, gchar *target_dir)
+{
+	GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+	gchar        *clip_text = gtk_clipboard_wait_for_text(clipboard);
+
+	if (!clip_text || !*clip_text)
+	{
+		ui_set_statusbar(TRUE, _("Clipboard is empty."));
+		g_free(clip_text);
+		return;
+	}
+	g_strstrip(clip_text);
+
+	gchar *src_path = g_path_is_absolute(clip_text)
+		? g_strdup(clip_text)
+		: g_build_filename(addressbar_last_address, clip_text, NULL);
+	g_free(clip_text);
+
+	if (!g_file_test(src_path, G_FILE_TEST_IS_REGULAR))
+	{
+		ui_set_statusbar(TRUE, _("Clipboard does not contain a valid file path: %s"), src_path);
+		g_free(src_path);
+		return;
+	}
+
+	gchar *basename  = g_path_get_basename(src_path);
+	gchar *dest_path = g_build_filename(target_dir, basename, NULL);
+	g_free(basename);
+
+	if (g_file_test(dest_path, G_FILE_TEST_EXISTS))
+	{
+		if (!dialogs_show_question(_("'%s' already exists.\nDo you want to overwrite it?"), dest_path))
+		{
+			g_free(dest_path);
+			g_free(src_path);
+			return;
+		}
+	}
+
+	GFile  *src   = g_file_new_for_path(src_path);
+	GFile  *dst   = g_file_new_for_path(dest_path);
+	GError *error = NULL;
+
+	if (!g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error))
+	{
+		ui_set_statusbar(TRUE, _("Failed to copy '%s': %s"), src_path, error->message);
+		g_error_free(error);
+	}
+	else
+	{
+		on_menu_refresh(NULL, NULL);
+	}
+
+	g_object_unref(src);
+	g_object_unref(dst);
+	g_free(src_path);
+	g_free(dest_path);
+}
+
 static GtkWidget*
 create_popup_menu(const gchar *name, const gchar *uri)
 {
@@ -1603,6 +1723,20 @@ create_popup_menu(const gchar *name, const gchar *uri)
 #endif
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect(item, "activate", G_CALLBACK(on_menu_create_new_object), (gpointer)"file");
+
+	{
+		gchar *paste_dir = (!uri || !*uri)
+			? g_strdup(addressbar_last_address)
+			: is_dir ? g_strdup(uri) : g_path_get_dirname(uri);
+#if GTK_CHECK_VERSION(3, 10, 0)
+		item = ui_image_menu_item_new("edit-paste", _("Paste _File"));
+#else
+		item = ui_image_menu_item_new(GTK_STOCK_PASTE, _("Paste _File"));
+#endif
+		gtk_container_add(GTK_CONTAINER(menu), item);
+		g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_paste_file),
+		                      paste_dir, (GClosureNotify)g_free, 0);
+	}
 
 #if GTK_CHECK_VERSION(3, 10, 0)
 	item = ui_image_menu_item_new("document-save-as", _("Rena_me"));
@@ -2113,6 +2247,173 @@ on_treeview_renamed(GtkCellRenderer *renderer, const gchar *path_string, const g
 }
 
 static void
+on_treeview_drag_data_get(GtkWidget *widget, GdkDragContext *context,
+		GtkSelectionData *data, guint info, guint time, gpointer user_data)
+{
+	GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(widget));
+	GtkTreeIter iter;
+	GtkTreeModel *model;
+	gchar *uri;
+
+	if (!gtk_tree_selection_get_selected(selection, &model, &iter))
+		return;
+
+	gtk_tree_model_get(model, &iter, TREEBROWSER_COLUMN_URI, &uri, -1);
+	if (!uri)
+		return;
+
+	if (info == 1) /* text/plain: relative or absolute path for terminal drops */
+	{
+		const gchar *root = NULL;
+		GeanyProject *project = geany->app->project;
+
+		if (project && !EMPTY(project->base_path))
+			root = project->base_path;
+		else if (addressbar_last_address)
+			root = addressbar_last_address;
+
+		const gchar *path = uri;
+		if (root && g_str_has_prefix(uri, root))
+		{
+			path = uri + strlen(root);
+			if (*path == G_DIR_SEPARATOR)
+				path++;
+		}
+		gtk_selection_data_set_text(data, path, -1);
+	}
+	else /* text/uri-list: file URI for treebrowser-internal moves */
+	{
+		gchar *file_uri = g_filename_to_uri(uri, NULL, NULL);
+		if (file_uri)
+		{
+			gchar *uri_list = g_strconcat(file_uri, "\r\n", NULL);
+			gtk_selection_data_set(data,
+					gtk_selection_data_get_target(data),
+					8, (guchar *)uri_list, strlen(uri_list));
+			g_free(uri_list);
+			g_free(file_uri);
+		}
+	}
+	g_free(uri);
+}
+
+static gboolean
+on_treeview_drag_motion(GtkWidget *widget, GdkDragContext *context,
+		gint x, gint y, guint time, gpointer user_data)
+{
+	GtkTreePath *path = NULL;
+	GtkTreeViewDropPosition pos;
+
+	/* gtk_drag_dest_set uses GTK_DEST_DEFAULT_MOTION with a G_CONNECT_AFTER handler
+	 * that calls gdk_drag_status().  Returning TRUE here stops the accumulator before
+	 * that handler fires, so we must call gdk_drag_status() ourselves. */
+	if (gtk_drag_dest_find_target(widget, context, NULL) != GDK_NONE &&
+	    gtk_tree_view_get_dest_row_at_pos(GTK_TREE_VIEW(widget), x, y, &path, &pos))
+	{
+		GdkDragAction avail = gdk_drag_context_get_actions(context);
+		GdkDragAction action = (avail & GDK_ACTION_MOVE) ? GDK_ACTION_MOVE : GDK_ACTION_COPY;
+
+		gtk_tree_view_set_drag_dest_row(GTK_TREE_VIEW(widget), path,
+				GTK_TREE_VIEW_DROP_INTO_OR_BEFORE);
+		gtk_tree_path_free(path);
+		gdk_drag_status(context, action, time);
+	}
+	else
+	{
+		gtk_tree_view_set_drag_dest_row(GTK_TREE_VIEW(widget), NULL, 0);
+		gdk_drag_status(context, 0, time);
+	}
+
+	return TRUE;
+}
+
+static void
+on_treeview_drag_leave(GtkWidget *widget, GdkDragContext *context,
+		guint time, gpointer user_data)
+{
+	gtk_tree_view_set_drag_dest_row(GTK_TREE_VIEW(widget), NULL, 0);
+}
+
+static void
+on_treeview_drag_data_received(GtkWidget *widget, GdkDragContext *context,
+		gint x, gint y, GtkSelectionData *data, guint info, guint time, gpointer user_data)
+{
+	GtkTreePath *path = NULL;
+	GtkTreeViewDropPosition pos;
+	GtkTreeIter iter;
+	gchar *dest_uri = NULL, *dest_dir = NULL;
+	gchar **uris = NULL;
+	gint i;
+	gboolean moved = FALSE;
+
+	gtk_tree_view_set_drag_dest_row(GTK_TREE_VIEW(widget), NULL, 0);
+
+	if (!gtk_tree_view_get_dest_row_at_pos(GTK_TREE_VIEW(widget), x, y, &path, &pos))
+		return;
+
+	gtk_tree_model_get_iter(GTK_TREE_MODEL(treestore), &iter, path);
+	gtk_tree_path_free(path);
+	gtk_tree_model_get(GTK_TREE_MODEL(treestore), &iter,
+			TREEBROWSER_COLUMN_URI, &dest_uri, -1);
+
+	if (!dest_uri)
+		return;
+
+	dest_dir = g_file_test(dest_uri, G_FILE_TEST_IS_DIR)
+			? g_strdup(dest_uri)
+			: g_path_get_dirname(dest_uri);
+	g_free(dest_uri);
+
+	uris = gtk_selection_data_get_uris(data);
+	if (!uris)
+	{
+		g_free(dest_dir);
+		return;
+	}
+
+	for (i = 0; uris[i]; i++)
+	{
+		gchar *src_path = g_filename_from_uri(uris[i], NULL, NULL);
+		gchar *basename, *new_path;
+
+		if (!src_path)
+			continue;
+
+		basename = g_path_get_basename(src_path);
+		new_path = g_build_filename(dest_dir, basename, NULL);
+		g_free(basename);
+
+		if (strcmp(src_path, new_path) != 0)
+		{
+			if (!g_file_test(new_path, G_FILE_TEST_EXISTS) ||
+				dialogs_show_question(_("'%s' already exists. Replace it?"), new_path))
+			{
+				GeanyDocument *doc = document_find_by_filename(src_path);
+
+				if (g_rename(src_path, new_path) == 0)
+				{
+					moved = TRUE;
+					if (doc && document_close(doc))
+						document_open_file(new_path, FALSE, NULL, NULL);
+				}
+				else
+					ui_set_statusbar(TRUE, _("Could not move '%s' to '%s'."),
+							src_path, new_path);
+			}
+		}
+
+		g_free(new_path);
+		g_free(src_path);
+	}
+
+	g_strfreev(uris);
+	g_free(dest_dir);
+
+	if (moved)
+		treebrowser_chroot(addressbar_last_address);
+}
+
+static void
 treebrowser_track_current_cb(void)
 {
 	if (CONFIG_FOLLOW_CURRENT_DOC)
@@ -2329,6 +2630,26 @@ create_sidebar(void)
 	g_signal_connect(treeview, 			"key-press-event", 		G_CALLBACK(on_treeview_keypress), 			NULL);
 	g_signal_connect(addressbar, 		"activate", 			G_CALLBACK(on_addressbar_activate), 			NULL);
 	g_signal_connect(filter, 			"activate", 			G_CALLBACK(on_filter_activate), 				NULL);
+
+	{
+		static GtkTargetEntry dnd_targets[] = {
+			{ (gchar *)"text/uri-list", 0, 0 },
+			{ (gchar *)"text/plain",    0, 1 },
+		};
+		gtk_drag_source_set(treeview, GDK_BUTTON1_MASK,
+				dnd_targets, G_N_ELEMENTS(dnd_targets), GDK_ACTION_MOVE | GDK_ACTION_COPY);
+		gtk_drag_dest_set(treeview,
+				GTK_DEST_DEFAULT_MOTION | GTK_DEST_DEFAULT_DROP,
+				dnd_targets, G_N_ELEMENTS(dnd_targets), GDK_ACTION_MOVE);
+		g_signal_connect(treeview, "drag-data-get",
+				G_CALLBACK(on_treeview_drag_data_get), NULL);
+		g_signal_connect(treeview, "drag-motion",
+				G_CALLBACK(on_treeview_drag_motion), NULL);
+		g_signal_connect(treeview, "drag-leave",
+				G_CALLBACK(on_treeview_drag_leave), NULL);
+		g_signal_connect(treeview, "drag-data-received",
+				G_CALLBACK(on_treeview_drag_data_received), NULL);
+	}
 
 	gtk_widget_show_all(sidebar_vbox);
 
@@ -2651,11 +2972,13 @@ plugin_configure(GtkDialog *dialog)
 static void
 project_open_cb(G_GNUC_UNUSED GObject *obj, G_GNUC_UNUSED GKeyFile *config, G_GNUC_UNUSED gpointer data)
 {
-	gchar *uri;
-
-	uri = get_default_dir();
-	treebrowser_chroot(uri);
-	g_free(uri);
+	GeanyProject *project = geany->app->project;
+	if (project && !EMPTY(project->base_path))
+	{
+		gchar *uri = utils_get_locale_from_utf8(project->base_path);
+		treebrowser_chroot(uri);
+		g_free(uri);
+	}
 }
 
 static void kb_activate(guint key_id)
@@ -2693,6 +3016,13 @@ static void kb_activate(guint key_id)
 	}
 }
 
+static void on_treebrowser_refresh_signal(G_GNUC_UNUSED GObject *obj,
+                                          G_GNUC_UNUSED gpointer data)
+{
+	if (addressbar_last_address)
+		treebrowser_browse(addressbar_last_address, NULL);
+}
+
 void
 plugin_init(GeanyData *data)
 {
@@ -2727,11 +3057,21 @@ plugin_init(GeanyData *data)
 
 	plugin_signal_connect(geany_plugin, NULL, "document-activate", TRUE,
 		(GCallback)&treebrowser_track_current_cb, NULL);
+
+	/* Connect to geanycontrol-refresh if geanycontrol is loaded */
+	{
+		GType obj_type = G_OBJECT_TYPE(geany->object);
+		if (g_signal_lookup("geanycontrol-refresh", obj_type))
+			g_signal_connect(geany->object, "geanycontrol-refresh",
+			                 G_CALLBACK(on_treebrowser_refresh_signal), NULL);
+	}
 }
 
 void
 plugin_cleanup(void)
 {
+	g_signal_handlers_disconnect_by_func(geany->object,
+	                                     G_CALLBACK(on_treebrowser_refresh_signal), NULL);
 	g_free(addressbar_last_address);
 	g_free(CONFIG_FILE);
 	g_free(CONFIG_OPEN_EXTERNAL_CMD);

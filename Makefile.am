@@ -99,8 +99,16 @@ if ENABLE_GEANYAGENT
 SUBDIRS += geanyagent
 endif
 
+if ENABLE_LINUXRECTSELECT
+SUBDIRS += linuxrectselect
+endif
+
 if ENABLE_GEANYCLI
 SUBDIRS += geanycli
+endif
+
+if ENABLE_GEANYCONTROL
+SUBDIRS += geanycontrol
 endif
 
 if ENABLE_GEANYSERVERS

@@ -80,5 +80,8 @@ UI should be rows in the same table as services.
 - status - show yellow dot if the greps indicate servers are running, this may not be an error, it tests are running
 - actions - buttons to kill by pids
 
+# TODO
 
+function to select and add servers from current systed setup
+function to add local lxc servers (problem needs root to justsee them)
 
