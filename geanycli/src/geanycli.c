@@ -225,6 +225,26 @@ static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer use
     gtk_widget_destroy(dialog);
 }
 
+static gboolean on_vte_key_press(GtkWidget *widget,
+                                  GdkEventKey *event,
+                                  gpointer user_data)
+{
+    (void)widget;
+    TermTab *tab = user_data;
+
+    /* Ctrl+C without Shift → send ETX (interrupt).  We must handle this here
+     * because Geany's global Edit>Copy accelerator intercepts Ctrl+C before
+     * the VTE widget's own key-press-event handler runs. */
+    if ((event->state & GDK_CONTROL_MASK) &&
+        !(event->state & (GDK_SHIFT_MASK | GDK_MOD1_MASK)) &&
+        (event->keyval == GDK_KEY_c || event->keyval == GDK_KEY_C))
+    {
+        vte_terminal_feed_child(tab->vte, "\x03", 1);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static gboolean on_vte_button_press(GtkWidget *widget,
                                     GdkEventButton *event,
                                     gpointer data)
@@ -281,6 +301,8 @@ static TermTab *create_tab(const gchar *cmd, const gchar *name)
 
     g_signal_connect(tab->vte, "child-exited",
                      G_CALLBACK(on_child_exited), tab);
+    g_signal_connect(vte_widget, "key-press-event",
+                     G_CALLBACK(on_vte_key_press), tab);
     g_signal_connect(vte_widget, "button-press-event",
                      G_CALLBACK(on_vte_button_press), tab);
 

@@ -2031,6 +2031,12 @@ on_treeview_keypress(GtkWidget *widget, GdkEventKey *event)
 		on_button_go_up();
 		return TRUE;
 	}
+	if (event->keyval == GDK_Delete)
+	{
+		if (gtk_tree_selection_get_selected(gtk_tree_view_get_selection(GTK_TREE_VIEW(widget)), &model, &iter))
+			on_menu_delete(NULL, NULL);
+		return TRUE;
+	}
 	if ((event->keyval == GDK_Menu) ||
 	    (event->keyval == GDK_F10 && (event->state & modifiers) == GDK_SHIFT_MASK))
 	{
