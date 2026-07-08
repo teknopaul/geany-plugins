@@ -183,6 +183,10 @@ if ENABLE_TABLECONVERT
 SUBDIRS += tableconvert
 endif
 
+if ENABLE_JACOCOCOVERAGE
+SUBDIRS += jacococoverage
+endif
+
 if ENABLE_TREEBROWSER
 SUBDIRS += treebrowser
 endif
