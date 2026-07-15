@@ -385,17 +385,14 @@ check_hidden(const gchar *filename)
 #else
 	if (base_name[0] == '.')
 	{
-<<<<<<< HEAD
-		if (g_strcmp0(base_name, ".claude") ==  0 ||
-			g_strcmp0(base_name, ".codex") ==  0 ||
-			g_strcmp0(base_name, ".github") ==  0 ||
-			g_strcmp0(base_name, ".azuredevops") ==  0)
-=======
 		if (g_strcmp0(base_name, ".claude") == 0 ||
 		    g_strcmp0(base_name, ".github") == 0 ||
+			g_strcmp0(base_name, ".codex") ==  0 ||
 		    g_strcmp0(base_name, ".copilot") == 0 ||
-		    g_strcmp0(base_name, ".azuredevops") == 0)
->>>>>>> 97c07e7e (geanyenv plugin, not fully working)
+		    g_strcmp0(base_name, ".azuredevops") == 0 ||
+		    g_strcmp0(base_name, ".requirements") == 0 ||
+		    g_strcmp0(base_name, ".planning") == 0 ||
+		    g_strcmp0(base_name, ".process") == 0 )
 		{
 			g_free(base_name);
 			return FALSE;

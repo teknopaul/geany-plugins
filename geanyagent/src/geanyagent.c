@@ -597,7 +597,7 @@ static gboolean ga_spawn_idle(G_GNUC_UNUSED gpointer data)
 	return G_SOURCE_REMOVE;
 }
 
-<<<<<<< HEAD
+
 static void update_agent_label(void)
 {
 	if (!agent_label || !agents || active_agent >= (gint)agents->len)
@@ -631,7 +631,9 @@ static void ga_switch_agent(gint index)
 
 	/* Unblock after the event queue has drained any pending child-exited */
 	g_idle_add(ga_unblock_child_exited_idle, NULL);
-=======
+
+}
+
 /* Kill the running agent and let on_child_exited trigger a fresh respawn.
  * The new spawn will inherit the updated process environment (g_setenv). */
 static void ga_restart(void)
@@ -661,7 +663,6 @@ static void on_restart_signal(G_GNUC_UNUSED GObject *obj,
 G_MODULE_EXPORT void geanyagent_restart(void)
 {
 	ga_restart();
->>>>>>> 97c07e7e (geanyenv plugin, not fully working)
 }
 
 
@@ -1591,7 +1592,6 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 	plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
 	                      G_CALLBACK(on_agent_project_close), NULL);
 
-<<<<<<< HEAD
 	/* Register and connect inter-plugin signals regardless of load order.
 	 * If geanycontrol loaded first it already registered them; if not, we do it. */
 	GType obj_type = G_OBJECT_TYPE(geany->object);
@@ -1613,24 +1613,6 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
 	plugin_signal_connect(plugin, geany->object, "geanyagent-new-prompt",
 	                      FALSE, G_CALLBACK(on_signal_new_prompt), NULL);
-=======
-	/* Register and handle the geanyagent-restart signal */
-	GType obj_type = G_OBJECT_TYPE(geany->object);
-	if (!g_signal_lookup("geanyagent-restart", obj_type))
-		g_signal_new("geanyagent-restart",
-		             obj_type,
-		             G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
-		             0, NULL, NULL,
-		             g_cclosure_marshal_VOID__VOID,
-		             G_TYPE_NONE, 0);
-	plugin_signal_connect(plugin, geany->object, "geanyagent-restart", FALSE,
-	                      G_CALLBACK(on_restart_signal), NULL);
-
-	editor_nb_handler_id = g_signal_connect(
-	    geany_data->main_widgets->notebook,
-	    "button-press-event",
-	    G_CALLBACK(on_editor_notebook_button_press), NULL);
->>>>>>> 97c07e7e (geanyenv plugin, not fully working)
 
 	return TRUE;
 }
