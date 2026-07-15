@@ -385,7 +385,10 @@ check_hidden(const gchar *filename)
 #else
 	if (base_name[0] == '.')
 	{
-		if (g_strcmp0(base_name, ".claude") == 0)
+		if (g_strcmp0(base_name, ".claude") ==  0 ||
+			g_strcmp0(base_name, ".codex") ==  0 ||
+			g_strcmp0(base_name, ".github") ==  0 ||
+			g_strcmp0(base_name, ".azuredevops") ==  0)
 		{
 			g_free(base_name);
 			return FALSE;
@@ -3029,6 +3032,89 @@ static void on_treebrowser_refresh_signal(G_GNUC_UNUSED GObject *obj,
 		treebrowser_browse(addressbar_last_address, NULL);
 }
 
+static void on_signal_tb_home(G_GNUC_UNUSED GObject *obj, G_GNUC_UNUSED gpointer data)
+{
+	on_button_go_home();
+}
+
+static void on_signal_tb_project(G_GNUC_UNUSED GObject *obj, G_GNUC_UNUSED gpointer data)
+{
+	on_button_go_project();
+}
+
+static void on_signal_tb_set_path(G_GNUC_UNUSED GObject *obj, G_GNUC_UNUSED gpointer data)
+{
+	on_button_current_path();
+}
+
+static GtkWidget *current_popup_menu = NULL;
+
+static void on_popup_menu_hide(GtkWidget *menu, G_GNUC_UNUSED gpointer data)
+{
+	if (current_popup_menu == menu)
+		current_popup_menu = NULL;
+}
+
+static void on_signal_tb_navigate(G_GNUC_UNUSED GObject *obj, gint delta, G_GNUC_UNUSED gpointer data)
+{
+	if (current_popup_menu && GTK_IS_WIDGET(current_popup_menu) &&
+	    gtk_widget_get_visible(current_popup_menu))
+	{
+		g_signal_emit_by_name(current_popup_menu, "move-current",
+		                      delta > 0 ? GTK_MENU_DIR_NEXT : GTK_MENU_DIR_PREV);
+		return;
+	}
+	if (!treeview) return;
+	gtk_widget_grab_focus(treeview);
+	gboolean handled = FALSE;
+	g_signal_emit_by_name(treeview, "move-cursor",
+	                      GTK_MOVEMENT_DISPLAY_LINES, delta, &handled);
+}
+
+static void on_signal_tb_activate(G_GNUC_UNUSED GObject *obj, G_GNUC_UNUSED gpointer data)
+{
+	if (!treeview) return;
+	GtkTreePath       *path = NULL;
+	GtkTreeViewColumn *col  = NULL;
+	gtk_tree_view_get_cursor(GTK_TREE_VIEW(treeview), &path, &col);
+	if (!col)
+		col = gtk_tree_view_get_column(GTK_TREE_VIEW(treeview), 0);
+	if (path) {
+		on_treeview_row_activated(treeview, path, col, NULL);
+		gtk_tree_path_free(path);
+	}
+}
+
+static void on_signal_tb_focus(G_GNUC_UNUSED GObject *obj, G_GNUC_UNUSED gpointer data)
+{
+	if (!treeview) return;
+	gtk_notebook_set_current_page(
+		GTK_NOTEBOOK(geany->main_widgets->sidebar_notebook), page_number);
+	gtk_widget_grab_focus(treeview);
+}
+
+static void on_signal_tb_popup_menu(G_GNUC_UNUSED GObject *obj, G_GNUC_UNUSED gpointer data)
+{
+	if (!toolbar_tools_button) return;
+
+	/* Populate the toolbar tools dropdown (same handler as clicking the arrow) */
+	on_toolbar_tools_show_menu(GTK_MENU_TOOL_BUTTON(toolbar_tools_button), NULL);
+	GtkWidget *menu = gtk_menu_tool_button_get_menu(
+	    GTK_MENU_TOOL_BUTTON(toolbar_tools_button));
+	if (!menu) return;
+
+	current_popup_menu = menu;
+	g_signal_connect(menu, "hide", G_CALLBACK(on_popup_menu_hide), NULL);
+
+	/* Notify interested parties (e.g. geanyvosk) so they can track the menu */
+	GType obj_type = G_OBJECT_TYPE(geany->object);
+	if (g_signal_lookup("treebrowser-menu-ready", obj_type))
+		g_signal_emit_by_name(geany->object, "treebrowser-menu-ready", menu);
+
+	gtk_menu_popup_at_widget(GTK_MENU(menu), GTK_WIDGET(toolbar_tools_button),
+	                         GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, NULL);
+}
+
 void
 plugin_init(GeanyData *data)
 {
@@ -3070,6 +3156,49 @@ plugin_init(GeanyData *data)
 		if (g_signal_lookup("geanycontrol-refresh", obj_type))
 			g_signal_connect(geany->object, "geanycontrol-refresh",
 			                 G_CALLBACK(on_treebrowser_refresh_signal), NULL);
+	}
+
+	/* Register and connect treebrowser IPC signals */
+	{
+		GType obj_type = G_OBJECT_TYPE(geany->object);
+		static const struct { const gchar *name; GType arg; } tb_sigs[] = {
+			{ "treebrowser-refresh",       G_TYPE_NONE    },
+			{ "treebrowser-home",          G_TYPE_NONE    },
+			{ "treebrowser-project-root",  G_TYPE_NONE    },
+			{ "treebrowser-set-path",      G_TYPE_NONE    },
+			{ "treebrowser-navigate",      G_TYPE_INT     },
+			{ "treebrowser-activate",      G_TYPE_NONE    },
+			{ "treebrowser-focus",         G_TYPE_NONE    },
+			{ "treebrowser-popup-menu",    G_TYPE_NONE    },
+			{ "treebrowser-menu-ready",    G_TYPE_POINTER },
+			{ NULL, 0 }
+		};
+		for (gint i = 0; tb_sigs[i].name; i++) {
+			if (!g_signal_lookup(tb_sigs[i].name, obj_type)) {
+				if (tb_sigs[i].arg == G_TYPE_NONE)
+					g_signal_new(tb_sigs[i].name, obj_type, G_SIGNAL_RUN_LAST,
+					             0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+				else
+					g_signal_new(tb_sigs[i].name, obj_type, G_SIGNAL_RUN_LAST,
+					             0, NULL, NULL, NULL, G_TYPE_NONE, 1, tb_sigs[i].arg);
+			}
+		}
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-refresh",
+		                      FALSE, G_CALLBACK(on_treebrowser_refresh_signal), NULL);
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-home",
+		                      FALSE, G_CALLBACK(on_signal_tb_home), NULL);
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-project-root",
+		                      FALSE, G_CALLBACK(on_signal_tb_project), NULL);
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-set-path",
+		                      FALSE, G_CALLBACK(on_signal_tb_set_path), NULL);
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-navigate",
+		                      FALSE, G_CALLBACK(on_signal_tb_navigate), NULL);
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-activate",
+		                      FALSE, G_CALLBACK(on_signal_tb_activate), NULL);
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-focus",
+		                      FALSE, G_CALLBACK(on_signal_tb_focus), NULL);
+		plugin_signal_connect(geany_plugin, geany->object, "treebrowser-popup-menu",
+		                      FALSE, G_CALLBACK(on_signal_tb_popup_menu), NULL);
 	}
 }
 

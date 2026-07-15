@@ -26,7 +26,18 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=0
+current_page=10
+FILE_NAME_0=2250;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyvosk%2FREADME;0;4
+FILE_NAME_1=5234;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyvosk%2Fcheatsheet.md;0;4
+FILE_NAME_2=734;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Funrecognised-words.prompt.md;0;4
+FILE_NAME_3=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Ffind-files.plan.md;0;4
+FILE_NAME_4=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-context%2Ftreebrowser-voice-handoff.md;0;4
+FILE_NAME_5=176;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fvosk-features.md;0;4
+FILE_NAME_6=910;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeanyspeach.md;0;4
+FILE_NAME_7=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fcompiler_output.prompt.md;0;4
+FILE_NAME_8=623;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeany-control-api.md;0;4
+FILE_NAME_9=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeany-control-api.plan.md;0;4
+FILE_NAME_10=1463;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeneral-features-todo.md;0;4
 
 [VTE]
 last_dir=/home/teknopaul

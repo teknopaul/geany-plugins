@@ -35,9 +35,17 @@ static GtkWidget   *agent_label = NULL;
 static gint         tab_index   = -1;
 static gboolean     running     = FALSE;  /* FALSE during cleanup to suppress restart */
 
-static gchar *agent_cmd    = NULL;
 static gchar *config_file  = NULL;
 static gchar *search_url   = NULL;
+
+typedef struct {
+    gchar *key;   /* config group key */
+    gchar *name;  /* display name */
+    gchar *cmd;   /* shell command */
+} AgentConfig;
+
+static GPtrArray *agents       = NULL;
+static gint       active_agent = 0;
 
 #define DEFAULT_SEARCH_URL "https://www.qwant.com/?q=%s"
 
@@ -64,6 +72,11 @@ static const gchar SKILL_TEMPLATE[] =
 
 #define AGENT_TOOLS_CONFIG "agenttools.conf"
 #define AGENT_TOOLS_GROUP  "tools"
+
+/* Forward declarations */
+static void update_agent_label(void);
+static void ga_save_config(void);
+static void ga_switch_agent(gint index);
 
 static GKeyFile  *agent_tools_config    = NULL;
 static GtkWidget *agent_tools_menu_item = NULL;
@@ -163,6 +176,24 @@ static void cleanup_askpass(void)
     askpass_prog = NULL;
 }
 
+
+static void agent_config_free(AgentConfig *ac)
+{
+    g_free(ac->key);
+    g_free(ac->name);
+    g_free(ac->cmd);
+    g_free(ac);
+}
+
+static void agents_free(void)
+{
+    if (agents) {
+        for (guint i = 0; i < agents->len; i++)
+            agent_config_free((AgentConfig *)g_ptr_array_index(agents, i));
+        g_ptr_array_free(agents, TRUE);
+        agents = NULL;
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /* Agent command dispatch                                              */
@@ -384,6 +415,42 @@ static void on_agent_project_close(G_GNUC_UNUSED GObject *obj,
 
 
 /* ------------------------------------------------------------------ */
+/* New Prompt / New Skill helpers (also called by signal handlers)     */
+
+static void ga_create_prompt(const gchar *name)
+{
+	gchar *base_path;
+	GeanyApp *app = geany->app;
+	if (app->project && app->project->base_path && *app->project->base_path)
+		base_path = g_strdup(app->project->base_path);
+	else
+		base_path = g_strdup(g_get_home_dir());
+
+	gchar *slug = g_ascii_strdown(name, -1);
+	for (gchar *c = slug; *c; c++) {
+		if (*c == ' ')
+			*c = '_';
+	}
+
+	gchar *prompts_dir = g_build_filename(base_path, "ai-prompts", NULL);
+	gchar *filename    = g_strdup_printf("%s.prompt.md", slug);
+	gchar *prompt_path = g_build_filename(prompts_dir, filename, NULL);
+
+	g_mkdir_with_parents(prompts_dir, 0755);
+	if (!g_file_test(prompt_path, G_FILE_TEST_EXISTS))
+		utils_write_file(prompt_path, "");
+
+	document_open_file(prompt_path, FALSE, NULL, NULL);
+
+	g_free(prompt_path);
+	g_free(filename);
+	g_free(slug);
+	g_free(prompts_dir);
+	g_free(base_path);
+}
+
+
+/* ------------------------------------------------------------------ */
 /* New Prompt dialog                                                    */
 
 static void on_new_prompt_activate(G_GNUC_UNUSED GtkMenuItem *item,
@@ -419,35 +486,7 @@ static void on_new_prompt_activate(G_GNUC_UNUSED GtkMenuItem *item,
 			continue;
 		}
 
-		/* Slugify: lowercase, spaces → underscores */
-		gchar *slug = g_ascii_strdown(name, -1);
-		for (gchar *c = slug; *c; c++) {
-			if (*c == ' ')
-				*c = '_';
-		}
-
-		gchar *base_path;
-		GeanyApp *app = geany->app;
-		if (app->project && app->project->base_path && *app->project->base_path)
-			base_path = g_strdup(app->project->base_path);
-		else
-			base_path = g_strdup(g_get_home_dir());
-
-		gchar *prompts_dir  = g_build_filename(base_path, "ai-prompts", NULL);
-		gchar *filename     = g_strdup_printf("%s.prompt.md", slug);
-		gchar *prompt_path  = g_build_filename(prompts_dir, filename, NULL);
-
-		g_mkdir_with_parents(prompts_dir, 0755);
-		if (!g_file_test(prompt_path, G_FILE_TEST_EXISTS))
-			utils_write_file(prompt_path, "");
-
-		document_open_file(prompt_path, FALSE, NULL, NULL);
-
-		g_free(prompt_path);
-		g_free(filename);
-		g_free(slug);
-		g_free(prompts_dir);
-		g_free(base_path);
+		ga_create_prompt(name);
 		break;
 	}
 	gtk_widget_destroy(dialog);
@@ -490,7 +529,10 @@ static void ga_spawn(void)
 	for (i = 0; i < n; i++)
 		argv[i] = shell_parts[i];
 	argv[n]     = (gchar *)"-c";
-	argv[n + 1] = agent_cmd ? agent_cmd : (gchar *)DEFAULT_CMD;
+	AgentConfig *ac = agents && active_agent < (gint)agents->len
+	                ? (AgentConfig *)g_ptr_array_index(agents, active_agent)
+	                : NULL;
+	argv[n + 1] = (ac && ac->cmd) ? ac->cmd : (gchar *)DEFAULT_CMD;
 	argv[n + 2] = NULL;
 
 	/* prefer project base path; fall back to home dir */
@@ -545,6 +587,41 @@ static gboolean ga_spawn_idle(G_GNUC_UNUSED gpointer data)
 {
 	ga_spawn();
 	return G_SOURCE_REMOVE;
+}
+
+static void update_agent_label(void)
+{
+	if (!agent_label || !agents || active_agent >= (gint)agents->len)
+		return;
+	AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, active_agent);
+	gchar *text = g_strdup_printf("\xf0\x9f\xa4\x96 %s", ac->name);
+	gtk_label_set_text(GTK_LABEL(agent_label), text);
+	g_free(text);
+}
+
+static gboolean ga_unblock_child_exited_idle(G_GNUC_UNUSED gpointer data)
+{
+	g_signal_handlers_unblock_by_func(agent_term,
+	                                  G_CALLBACK(on_child_exited), NULL);
+	return G_SOURCE_REMOVE;
+}
+
+static void ga_switch_agent(gint index)
+{
+	if (!agent_term || index < 0 || index >= (gint)agents->len || index == active_agent)
+		return;
+
+	active_agent = index;
+	update_agent_label();
+	ga_save_config();
+
+	/* Block child-exited during switch to prevent auto-restart of old process */
+	g_signal_handlers_block_by_func(agent_term,
+	                                G_CALLBACK(on_child_exited), NULL);
+	ga_spawn();
+
+	/* Unblock after the event queue has drained any pending child-exited */
+	g_idle_add(ga_unblock_child_exited_idle, NULL);
 }
 
 
@@ -693,6 +770,31 @@ static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item,
 	gtk_widget_destroy(dialog);
 }
 
+static void ga_create_skill(const gchar *name)
+{
+	gchar *base_path;
+	GeanyApp *app = geany->app;
+	if (app->project && app->project->base_path && *app->project->base_path)
+		base_path = g_strdup(app->project->base_path);
+	else
+		base_path = g_strdup(g_get_home_dir());
+
+	gchar *skill_dir  = g_build_filename(base_path, ".claude", "skills", name, NULL);
+	gchar *skill_path = g_build_filename(skill_dir, "SKILL.md", NULL);
+
+	g_mkdir_with_parents(skill_dir, 0755);
+
+	gchar *file_content = g_strdup_printf(SKILL_TEMPLATE, name);
+	utils_write_file(skill_path, file_content);
+	g_free(file_content);
+
+	document_open_file(skill_path, FALSE, NULL, NULL);
+
+	g_free(skill_path);
+	g_free(skill_dir);
+	g_free(base_path);
+}
+
 static void on_new_skill_activate(G_GNUC_UNUSED GtkMenuItem *item,
                                   G_GNUC_UNUSED gpointer data)
 {
@@ -732,27 +834,7 @@ static void on_new_skill_activate(G_GNUC_UNUSED GtkMenuItem *item,
 			continue;
 		}
 
-		gchar *base_path;
-		GeanyApp *app = geany->app;
-		if (app->project && app->project->base_path && *app->project->base_path)
-			base_path = g_strdup(app->project->base_path);
-		else
-			base_path = g_strdup(g_get_home_dir());
-
-		gchar *skill_dir  = g_build_filename(base_path, ".claude", "skills", name, NULL);
-		gchar *skill_path = g_build_filename(skill_dir, "SKILL.md", NULL);
-
-		g_mkdir_with_parents(skill_dir, 0755);
-
-		gchar *file_content = g_strdup_printf(SKILL_TEMPLATE, name);
-		utils_write_file(skill_path, file_content);
-		g_free(file_content);
-
-		document_open_file(skill_path, FALSE, NULL, NULL);
-
-		g_free(skill_path);
-		g_free(skill_dir);
-		g_free(base_path);
+		ga_create_skill(name);
 		break;
 	}
 	gtk_widget_destroy(dialog);
@@ -776,6 +858,13 @@ static void on_internet_search_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointe
 	g_free(encoded);
 	gtk_show_uri(NULL, url, GDK_CURRENT_TIME, NULL);
 	g_free(url);
+}
+
+static void on_switch_agent_activate(GtkMenuItem *item, gpointer user_data)
+{
+	gint *idx = (gint *)user_data;
+	if (*idx != active_agent && gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(item)))
+		ga_switch_agent(*idx);
 }
 
 static gboolean on_vte_button_press(GtkWidget *widget,
@@ -809,6 +898,33 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 	GtkWidget *paste_item = gtk_menu_item_new_with_label(_("Paste"));
 	g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
+
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+	if (agents && agents->len > 1)
+	{
+		GtkWidget *agent_submenu = gtk_menu_new();
+		GtkWidget *agent_item = gtk_menu_item_new_with_label(_("Switch Agent"));
+		gtk_menu_item_set_submenu(GTK_MENU_ITEM(agent_item), agent_submenu);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), agent_item);
+
+		GSList *group = NULL;
+		for (guint i = 0; i < agents->len; i++)
+		{
+			AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, i);
+			GtkWidget *mi = gtk_radio_menu_item_new_with_label(group, ac->name);
+			group = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(mi));
+			if ((gint)i == active_agent)
+				gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(mi), TRUE);
+			gint *idx = g_new(gint, 1);
+			*idx = (gint)i;
+			g_signal_connect_data(mi, "activate",
+			                      G_CALLBACK(on_switch_agent_activate),
+			                      idx, (GClosureNotify)g_free, 0);
+			gtk_menu_shell_append(GTK_MENU_SHELL(agent_submenu), mi);
+		}
+		gtk_widget_show(agent_submenu);
+	}
 
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 
@@ -898,9 +1014,14 @@ static void create_agent_tab(void)
 
 	gtk_widget_show_all(agent_hbox);
 
+	/* Tag the page widget so geanycontrol's switch-tab can find it by keyword "agent" */
+	g_object_set_data_full(G_OBJECT(agent_hbox), "geanyagent-tab-keywords",
+	                       g_strdup("agent"), g_free);
+
 	/* 🤖 Agent — UTF-8 encoded inline */
-	label = gtk_label_new("\xf0\x9f\xa4\x96 Agent");
+	label = gtk_label_new(NULL);
 	agent_label = label;
+	update_agent_label();
 	tab_index = gtk_notebook_append_page(
 	    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
 	    agent_hbox, label);
@@ -912,15 +1033,83 @@ static void create_agent_tab(void)
 
 static void ga_load_config(void)
 {
-	GKeyFile *kf = g_key_file_new();
+	GKeyFile *kf   = g_key_file_new();
+	gboolean  migrated = FALSE;
+
+	agents_free();
+	agents = g_ptr_array_new();
+	active_agent = 0;
+
 	if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL))
 	{
-		gchar *v = g_key_file_get_string(kf, "agent", "cmd", NULL);
-		if (v)
+		gchar *agents_str = g_key_file_get_string(kf, "agent", "agents", NULL);
+
+		if (agents_str)
 		{
-			g_free(agent_cmd);
-			agent_cmd = v;
+			gchar **keys = g_strsplit(agents_str, ",", -1);
+			for (gint i = 0; keys[i]; i++)
+			{
+				gchar *key = g_strstrip(keys[i]);
+				if (!*key)
+					continue;
+				gchar *group = g_strdup_printf("agent:%s", key);
+				if (g_key_file_has_group(kf, group))
+				{
+					AgentConfig *ac = g_new0(AgentConfig, 1);
+					ac->key  = g_strdup(key);
+					ac->name = g_key_file_get_string(kf, group, "name", NULL);
+					ac->cmd  = g_key_file_get_string(kf, group, "cmd", NULL);
+					if (!ac->name)
+						ac->name = g_strdup(key);
+					g_ptr_array_add(agents, ac);
+				}
+				g_free(group);
+			}
+			g_strfreev(keys);
+			g_free(agents_str);
+
+			gchar *active_str = g_key_file_get_string(kf, "agent", "active", NULL);
+			if (active_str)
+			{
+				for (guint i = 0; i < agents->len; i++)
+				{
+					AgentConfig *a = (AgentConfig *)g_ptr_array_index(agents, i);
+					if (g_strcmp0(a->key, active_str) == 0)
+					{
+						active_agent = (gint)i;
+						break;
+					}
+				}
+				g_free(active_str);
+			}
 		}
+
+		/* Legacy: no agents key — migrate single cmd to new format */
+		if (agents->len == 0)
+		{
+			gchar *v = g_key_file_get_string(kf, "agent", "cmd", NULL);
+			gchar *cmd = v ? v : g_strdup(DEFAULT_CMD);
+			AgentConfig *ac = g_new0(AgentConfig, 1);
+
+			/* Derive key and display name from the command */
+			gchar *base = g_path_get_basename(cmd);
+			ac->key = base; /* takes ownership */
+
+			if (*base)
+			{
+				gchar *n = g_strdup(base);
+				n[0] = g_ascii_toupper(n[0]);
+				ac->name = n;
+			}
+			else
+			{
+				ac->name = g_strdup("Agent");
+			}
+			ac->cmd  = cmd;
+			g_ptr_array_add(agents, ac);
+			migrated = TRUE;
+		}
+
 		use_askpass = g_key_file_get_boolean(kf, "agent", "use_askpass", NULL);
 		gchar *su = g_key_file_get_string(kf, "agent", "search_url", NULL);
 		if (su)
@@ -929,12 +1118,27 @@ static void ga_load_config(void)
 			search_url = su;
 		}
 	}
+
 	g_key_file_free(kf);
 
-	if (!agent_cmd)
-		agent_cmd = g_strdup(DEFAULT_CMD);
+	/* Guarantee at least one agent */
+	if (agents->len == 0)
+	{
+		AgentConfig *ac = g_new0(AgentConfig, 1);
+		ac->key  = g_strdup(DEFAULT_CMD);
+		ac->name = g_strdup_printf("%c%s",
+		           g_ascii_toupper(DEFAULT_CMD[0]), DEFAULT_CMD + 1);
+		ac->cmd  = g_strdup(DEFAULT_CMD);
+		g_ptr_array_add(agents, ac);
+		migrated = TRUE;
+	}
+
 	if (!search_url)
 		search_url = g_strdup(DEFAULT_SEARCH_URL);
+
+	/* Persist migration so the next load finds the new format */
+	if (migrated)
+		ga_save_config();
 }
 
 static void ga_save_config(void)
@@ -942,9 +1146,32 @@ static void ga_save_config(void)
 	GKeyFile *kf   = g_key_file_new();
 	gchar    *data = NULL;
 
-	g_key_file_set_string(kf,  "agent", "cmd",        agent_cmd ? agent_cmd : DEFAULT_CMD);
+	/* Build comma-separated agent key list */
+	GString *keys = g_string_new("");
+	for (guint i = 0; i < agents->len; i++)
+	{
+		AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, i);
+		if (i > 0)
+			g_string_append_c(keys, ',');
+		g_string_append(keys, ac->key);
+
+		gchar *group = g_strdup_printf("agent:%s", ac->key);
+		g_key_file_set_string(kf, group, "name", ac->name);
+		g_key_file_set_string(kf, group, "cmd",  ac->cmd);
+		g_free(group);
+	}
+
+	g_key_file_set_string(kf, "agent", "agents", keys->str);
+	g_string_free(keys, TRUE);
+
+	AgentConfig *active = (AgentConfig *)g_ptr_array_index(agents, active_agent);
+	g_key_file_set_string(kf, "agent", "active", active->key);
+
+	/* Legacy single cmd field for backward compat */
+	g_key_file_set_string(kf,  "agent", "cmd",        active->cmd);
 	g_key_file_set_boolean(kf, "agent", "use_askpass", use_askpass);
 	g_key_file_set_string(kf,  "agent", "search_url", search_url ? search_url : DEFAULT_SEARCH_URL);
+
 	data = g_key_file_to_data(kf, NULL, NULL);
 	utils_write_file(config_file, data);
 	g_free(data);
@@ -955,20 +1182,86 @@ static void ga_save_config(void)
 /* ------------------------------------------------------------------ */
 /* Configure dialog                                                    */
 
-typedef struct { GtkWidget *cmd_entry; GtkWidget *askpass_check; GtkWidget *search_url_entry; } ConfigWidgets;
+typedef struct {
+	GtkWidget *agent_combo;
+	GtkWidget *name_entry;
+	GtkWidget *cmd_entry;
+	GtkWidget *askpass_check;
+	GtkWidget *search_url_entry;
+} ConfigWidgets;
+
+static void on_agent_combo_changed(GtkComboBox *combo, ConfigWidgets *cw)
+{
+	gint idx = gtk_combo_box_get_active(combo);
+	if (idx < 0 || idx >= (gint)agents->len)
+		return;
+	AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, idx);
+	gtk_entry_set_text(GTK_ENTRY(cw->name_entry), ac->name ? ac->name : "");
+	gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),  ac->cmd  ? ac->cmd  : "");
+}
+
+static void on_agent_add_clicked(G_GNUC_UNUSED GtkButton *btn, ConfigWidgets *cw)
+{
+	gchar *key = g_strdup_printf("agent_%d", (gint)agents->len + 1);
+	AgentConfig *ac = g_new0(AgentConfig, 1);
+	ac->key  = key;
+	ac->name = g_strdup("New Agent");
+	ac->cmd  = g_strdup(DEFAULT_CMD);
+	g_ptr_array_add(agents, ac);
+
+	gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cw->agent_combo), ac->name);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cw->agent_combo), (gint)agents->len - 1);
+}
+
+static void on_agent_remove_clicked(G_GNUC_UNUSED GtkButton *btn, ConfigWidgets *cw)
+{
+	if (agents->len <= 1)
+		return;
+	gint idx = gtk_combo_box_get_active(GTK_COMBO_BOX(cw->agent_combo));
+	if (idx < 0)
+		return;
+
+	agent_config_free((AgentConfig *)g_ptr_array_index(agents, idx));
+	g_ptr_array_remove_index(agents, idx);
+
+	if (active_agent >= (gint)agents->len)
+		active_agent = (gint)agents->len - 1;
+	if (active_agent < 0)
+		active_agent = 0;
+
+	/* Rebuild combo */
+	gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(cw->agent_combo));
+	for (guint i = 0; i < agents->len; i++)
+	{
+		AgentConfig *a = (AgentConfig *)g_ptr_array_index(agents, i);
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cw->agent_combo), a->name);
+	}
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cw->agent_combo), active_agent);
+
+	update_agent_label();
+	ga_save_config();
+}
 
 static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
                                   gint response, ConfigWidgets *cw)
 {
 	if (response == GTK_RESPONSE_OK || response == GTK_RESPONSE_APPLY)
 	{
-		const gchar *new_cmd = gtk_entry_get_text(GTK_ENTRY(cw->cmd_entry));
-		g_free(agent_cmd);
-		agent_cmd   = g_strdup(new_cmd);
+		gint idx = gtk_combo_box_get_active(GTK_COMBO_BOX(cw->agent_combo));
+		if (idx >= 0 && idx < (gint)agents->len)
+		{
+			AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, idx);
+			g_free(ac->name);
+			ac->name   = g_strdup(gtk_entry_get_text(GTK_ENTRY(cw->name_entry)));
+			g_free(ac->cmd);
+			ac->cmd    = g_strdup(gtk_entry_get_text(GTK_ENTRY(cw->cmd_entry)));
+			active_agent = idx;
+		}
 		use_askpass = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cw->askpass_check));
 		const gchar *new_url = gtk_entry_get_text(GTK_ENTRY(cw->search_url_entry));
 		g_free(search_url);
 		search_url  = g_strdup(new_url && *new_url ? new_url : DEFAULT_SEARCH_URL);
+		update_agent_label();
 		ga_save_config();
 	}
 	g_free(cw);
@@ -981,11 +1274,40 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	ConfigWidgets *cw   = g_new0(ConfigWidgets, 1);
 	GtkWidget     *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
 
-	GtkWidget *cmd_label = gtk_label_new(_("Agent command:"));
+	/* Agent selection row */
+	GtkWidget *agent_hdr = gtk_label_new(_("Agents:"));
+	gtk_widget_set_halign(agent_hdr, GTK_ALIGN_START);
+
+	cw->agent_combo = gtk_combo_box_text_new();
+	for (guint i = 0; i < agents->len; i++)
+	{
+		AgentConfig *a = (AgentConfig *)g_ptr_array_index(agents, i);
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cw->agent_combo), a->name);
+	}
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cw->agent_combo), active_agent);
+
+	GtkWidget *add_btn    = gtk_button_new_with_label(_("Add"));
+	GtkWidget *remove_btn = gtk_button_new_with_label(_("Remove"));
+
+	GtkWidget *agent_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+	gtk_box_pack_start(GTK_BOX(agent_row), cw->agent_combo, TRUE,  TRUE,  0);
+	gtk_box_pack_start(GTK_BOX(agent_row), add_btn,         FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(agent_row), remove_btn,      FALSE, FALSE, 0);
+
+	GtkWidget *name_label = gtk_label_new(_("Name:"));
+	gtk_widget_set_halign(name_label, GTK_ALIGN_START);
+	cw->name_entry = gtk_entry_new();
+
+	GtkWidget *cmd_label = gtk_label_new(_("Command:"));
 	gtk_widget_set_halign(cmd_label, GTK_ALIGN_START);
 	cw->cmd_entry = gtk_entry_new();
-	gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),
-	                   agent_cmd ? agent_cmd : DEFAULT_CMD);
+
+	/* Load current agent's values */
+	{
+		AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, active_agent);
+		gtk_entry_set_text(GTK_ENTRY(cw->name_entry), ac->name ? ac->name : "");
+		gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),  ac->cmd  ? ac->cmd  : "");
+	}
 
 	cw->askpass_check = gtk_check_button_new_with_label(
 	    _("Intercept sudo with GUI password dialog (Linux only, requires zenity or ssh-askpass)"));
@@ -1004,15 +1326,73 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	    "URL template for Internet Search. %s is replaced with the URL-encoded query.\n"
 	    "Example: https://www.qwant.com/?q=%s");
 
-	gtk_box_pack_start(GTK_BOX(vbox), cmd_label,           FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,       FALSE, FALSE, 0);
+	/* Pack everything */
+	gtk_box_pack_start(GTK_BOX(vbox), agent_hdr,        FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), agent_row,         FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""), FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(vbox), name_label,        FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->name_entry,    FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cmd_label,         FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,     FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""), FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(vbox), cw->askpass_check,   FALSE, FALSE, 4);
 	gtk_box_pack_start(GTK_BOX(vbox), search_url_label,    FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), cw->search_url_entry, FALSE, FALSE, 0);
 
+	g_signal_connect(cw->agent_combo, "changed",
+	                 G_CALLBACK(on_agent_combo_changed), cw);
+	g_signal_connect(add_btn, "clicked",
+	                 G_CALLBACK(on_agent_add_clicked), cw);
+	g_signal_connect(remove_btn, "clicked",
+	                 G_CALLBACK(on_agent_remove_clicked), cw);
 	g_signal_connect(dialog, "response",
 	                 G_CALLBACK(on_configure_response), cw);
 	return vbox;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* geanycontrol inter-plugin signals: new-skill, new-prompt           */
+
+static void on_signal_new_skill(G_GNUC_UNUSED GObject *obj,
+                                const gchar *name,
+                                G_GNUC_UNUSED gpointer data)
+{
+	if (name && *name)
+		ga_create_skill(name);
+	else
+		on_new_skill_activate(NULL, NULL);
+}
+
+static void on_signal_new_prompt(G_GNUC_UNUSED GObject *obj,
+                                 const gchar *name,
+                                 G_GNUC_UNUSED gpointer data)
+{
+	if (name && *name)
+		ga_create_prompt(name);
+	else
+		on_new_prompt_activate(NULL, NULL);
+}
+
+
+/* ------------------------------------------------------------------ */
+/* geanycontrol inter-plugin signal: voice sends commands to agent VTE */
+
+static void on_geanycontrol_send_to_agent(G_GNUC_UNUSED GObject *obj,
+                                          const gchar *text,
+                                          G_GNUC_UNUSED gpointer data)
+{
+	if (!agent_term || !text || !*text)
+		return;
+#if VTE_CHECK_VERSION(0, 70, 0)
+	VtePty *pty = vte_terminal_get_pty(agent_term);
+	if (pty) {
+		int fd = vte_pty_get_fd(pty);
+		write(fd, text, strlen(text));
+	}
+#else
+	vte_terminal_feed_child(agent_term, text, (gssize)strlen(text));
+#endif
 }
 
 
@@ -1057,6 +1437,28 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 	plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
 	                      G_CALLBACK(on_agent_project_close), NULL);
 
+	/* Register and connect inter-plugin signals regardless of load order.
+	 * If geanycontrol loaded first it already registered them; if not, we do it. */
+	GType obj_type = G_OBJECT_TYPE(geany->object);
+
+	if (!g_signal_lookup("geanycontrol-send-to-agent", obj_type))
+		g_signal_new("geanycontrol-send-to-agent", obj_type, G_SIGNAL_RUN_LAST,
+		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+	plugin_signal_connect(plugin, geany->object, "geanycontrol-send-to-agent",
+	                      FALSE, G_CALLBACK(on_geanycontrol_send_to_agent), NULL);
+
+	if (!g_signal_lookup("geanyagent-new-skill", obj_type))
+		g_signal_new("geanyagent-new-skill", obj_type, G_SIGNAL_RUN_LAST,
+		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+	plugin_signal_connect(plugin, geany->object, "geanyagent-new-skill",
+	                      FALSE, G_CALLBACK(on_signal_new_skill), NULL);
+
+	if (!g_signal_lookup("geanyagent-new-prompt", obj_type))
+		g_signal_new("geanyagent-new-prompt", obj_type, G_SIGNAL_RUN_LAST,
+		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+	plugin_signal_connect(plugin, geany->object, "geanyagent-new-prompt",
+	                      FALSE, G_CALLBACK(on_signal_new_prompt), NULL);
+
 	return TRUE;
 }
 
@@ -1093,8 +1495,8 @@ static void ga_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
 		agent_tools_config = NULL;
 	}
 
-	g_free(agent_cmd);
-	agent_cmd = NULL;
+	agents_free();
+
 	g_free(search_url);
 	search_url = NULL;
 	g_free(config_file);

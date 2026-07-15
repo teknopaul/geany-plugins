@@ -10,4 +10,4 @@ Ideally access to all features, but most important are.
 - executing menu buttons and items from the treebrowser plugin
 - refreshing UI with changes made by the agent.
 
-I/cleart should be possible for the agent to execute UI driven operations, and the system we build should allow scripted cli access as well to the same operations.
+It clearly should be possible for the agent to execute UI driven operations, and the system we build should allow scripted cli access as well to the same operations.

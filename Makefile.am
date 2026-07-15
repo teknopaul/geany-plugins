@@ -111,6 +111,10 @@ if ENABLE_GEANYCONTROL
 SUBDIRS += geanycontrol
 endif
 
+if ENABLE_GEANYVOSK
+SUBDIRS += geanyvosk
+endif
+
 if ENABLE_GEANYSERVERS
 SUBDIRS += geanyservers
 endif
