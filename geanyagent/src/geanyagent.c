@@ -15,7 +15,9 @@
 
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <termios.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
@@ -34,6 +36,7 @@ static GtkWidget   *agent_hbox  = NULL;
 static GtkWidget   *agent_label = NULL;
 static gint         tab_index   = -1;
 static gboolean     running     = FALSE;  /* FALSE during cleanup to suppress restart */
+static GPid         agent_pid   = 0;      /* child PID, 0 when not running */
 
 static gchar *config_file  = NULL;
 static gchar *search_url   = NULL;
@@ -80,6 +83,8 @@ static void ga_switch_agent(gint index);
 
 static GKeyFile  *agent_tools_config    = NULL;
 static GtkWidget *agent_tools_menu_item = NULL;
+
+static gulong editor_nb_handler_id = 0;
 
 
 /* ------------------------------------------------------------------ */
@@ -499,18 +504,21 @@ static void on_new_prompt_activate(G_GNUC_UNUSED GtkMenuItem *item,
 static gboolean ga_spawn_idle(gpointer data);
 
 static void on_spawn_done(G_GNUC_UNUSED VteTerminal *term,
-                          G_GNUC_UNUSED GPid pid,
+                          GPid pid,
                           GError *error,
                           G_GNUC_UNUSED gpointer data)
 {
 	if (error)
 		g_warning("geanyagent: spawn failed: %s", error->message);
+	else
+		agent_pid = pid;
 }
 
 static void on_child_exited(G_GNUC_UNUSED VteTerminal *term,
                              G_GNUC_UNUSED int status,
                              G_GNUC_UNUSED gpointer data)
 {
+	agent_pid = 0;
 	if (running)
 		g_idle_add(ga_spawn_idle, NULL);
 }
@@ -589,6 +597,7 @@ static gboolean ga_spawn_idle(G_GNUC_UNUSED gpointer data)
 	return G_SOURCE_REMOVE;
 }
 
+<<<<<<< HEAD
 static void update_agent_label(void)
 {
 	if (!agent_label || !agents || active_agent >= (gint)agents->len)
@@ -622,6 +631,37 @@ static void ga_switch_agent(gint index)
 
 	/* Unblock after the event queue has drained any pending child-exited */
 	g_idle_add(ga_unblock_child_exited_idle, NULL);
+=======
+/* Kill the running agent and let on_child_exited trigger a fresh respawn.
+ * The new spawn will inherit the updated process environment (g_setenv). */
+static void ga_restart(void)
+{
+	if (agent_pid > 0) {
+		kill(agent_pid, SIGHUP);
+		agent_pid = 0;
+	} else {
+		/* No tracked PID — try to kill the PTY foreground process group */
+		VtePty *pty = agent_term ? vte_terminal_get_pty(agent_term) : NULL;
+		if (pty) {
+			int fd = vte_pty_get_fd(pty);
+			pid_t pg = tcgetpgrp(fd);
+			if (pg > 0)
+				killpg(pg, SIGHUP);
+		}
+	}
+}
+
+/* Signal handler — emitted by geanyenv (or anything else) on geany->object */
+static void on_restart_signal(G_GNUC_UNUSED GObject *obj,
+                               G_GNUC_UNUSED gpointer data)
+{
+	ga_restart();
+}
+
+G_MODULE_EXPORT void geanyagent_restart(void)
+{
+	ga_restart();
+>>>>>>> 97c07e7e (geanyenv plugin, not fully working)
 }
 
 
@@ -735,6 +775,120 @@ on_agent_vte_drag_data_received(GtkWidget *widget, GdkDragContext *context,
     gtk_drag_finish(context, TRUE, FALSE, time);
     g_signal_stop_emission_by_name(widget, "drag-data-received");
 }
+
+
+/* ------------------------------------------------------------------ */
+/* Editor notebook tab right-click — "Add to Agent"                   */
+
+/* Return the notebook page index whose tab label covers (event_x, event_y),
+ * or -1 if no tab was hit.  Coordinates are in the notebook widget's frame. */
+static gint notebook_tab_at(GtkNotebook *nb, gdouble event_x, gdouble event_y)
+{
+    gint n = gtk_notebook_get_n_pages(nb);
+    for (gint i = 0; i < n; i++)
+    {
+        GtkWidget *page = gtk_notebook_get_nth_page(nb, i);
+        GtkWidget *tab  = gtk_notebook_get_tab_label(nb, page);
+        if (!tab || !gtk_widget_get_visible(tab))
+            continue;
+        GtkAllocation alloc;
+        gtk_widget_get_allocation(tab, &alloc);
+        if (event_x >= alloc.x && event_x < alloc.x + alloc.width &&
+            event_y >= alloc.y && event_y < alloc.y + alloc.height)
+            return i;
+    }
+    return -1;
+}
+
+/* Find the GeanyDocument whose Scintilla widget is the nth notebook page. */
+static GeanyDocument *doc_from_notebook_page(GtkNotebook *nb, gint page)
+{
+    if (page < 0)
+        return NULL;
+    GtkWidget *page_widget = gtk_notebook_get_nth_page(nb, page);
+    if (!page_widget)
+        return NULL;
+    guint len = geany_data->documents_array->len;
+    for (guint i = 0; i < len; i++)
+    {
+        GeanyDocument *d = (GeanyDocument *)geany_data->documents_array->pdata[i];
+        if (d && d->is_valid && GTK_WIDGET(d->editor->sci) == page_widget)
+            return d;
+    }
+    return NULL;
+}
+
+/* Return file_path relative to the open project's base_path, or file_path as-is. */
+static gchar *path_for_agent(const gchar *file_path)
+{
+    if (!file_path)
+        return NULL;
+    if (geany->app->project && geany->app->project->base_path)
+    {
+        const gchar *base    = geany->app->project->base_path;
+        gsize        baselen = strlen(base);
+        if (g_str_has_prefix(file_path, base))
+        {
+            const gchar *rel = file_path + baselen;
+            while (*rel == G_DIR_SEPARATOR)
+                rel++;
+            if (*rel)
+                return g_strdup(rel);
+        }
+    }
+    return g_strdup(file_path);
+}
+
+static void on_tab_add_to_agent(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+    const gchar *file_path = (const gchar *)user_data;
+    if (!agent_term || !file_path)
+        return;
+
+    gchar *payload = g_strconcat("@", file_path, NULL);
+    gsize  len     = strlen(payload);
+
+#if VTE_CHECK_VERSION(0, 70, 0)
+    VtePty *pty = vte_terminal_get_pty(agent_term);
+    if (pty)
+        write(vte_pty_get_fd(pty), payload, len);
+#else
+    vte_terminal_feed_child(agent_term, payload, (gssize)len);
+#endif
+    g_free(payload);
+}
+
+static gboolean on_editor_notebook_button_press(GtkWidget   *widget,
+                                                GdkEventButton *event,
+                                                G_GNUC_UNUSED gpointer data)
+{
+    if (event->button != 3)
+        return FALSE;
+
+    GtkNotebook   *nb   = GTK_NOTEBOOK(widget);
+    gint           page = notebook_tab_at(nb, event->x, event->y);
+    if (page < 0)
+        return FALSE;
+
+    GeanyDocument *doc = doc_from_notebook_page(nb, page);
+    if (!doc || !doc->file_name)
+        return FALSE;
+
+    gchar *rel_path = path_for_agent(doc->file_name);
+
+    GtkWidget *menu     = gtk_menu_new();
+    GtkWidget *add_item = gtk_menu_item_new_with_label(_("Add to Agent"));
+    gtk_widget_set_sensitive(add_item, agent_term != NULL);
+    g_signal_connect_data(add_item, "activate",
+                          G_CALLBACK(on_tab_add_to_agent),
+                          rel_path, (GClosureNotify)g_free, 0);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), add_item);
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
+
+    return TRUE;
+}
+
 
 static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item,
                                    G_GNUC_UNUSED gpointer data)
@@ -1437,6 +1591,7 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 	plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
 	                      G_CALLBACK(on_agent_project_close), NULL);
 
+<<<<<<< HEAD
 	/* Register and connect inter-plugin signals regardless of load order.
 	 * If geanycontrol loaded first it already registered them; if not, we do it. */
 	GType obj_type = G_OBJECT_TYPE(geany->object);
@@ -1458,6 +1613,24 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
 	plugin_signal_connect(plugin, geany->object, "geanyagent-new-prompt",
 	                      FALSE, G_CALLBACK(on_signal_new_prompt), NULL);
+=======
+	/* Register and handle the geanyagent-restart signal */
+	GType obj_type = G_OBJECT_TYPE(geany->object);
+	if (!g_signal_lookup("geanyagent-restart", obj_type))
+		g_signal_new("geanyagent-restart",
+		             obj_type,
+		             G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
+		             0, NULL, NULL,
+		             g_cclosure_marshal_VOID__VOID,
+		             G_TYPE_NONE, 0);
+	plugin_signal_connect(plugin, geany->object, "geanyagent-restart", FALSE,
+	                      G_CALLBACK(on_restart_signal), NULL);
+
+	editor_nb_handler_id = g_signal_connect(
+	    geany_data->main_widgets->notebook,
+	    "button-press-event",
+	    G_CALLBACK(on_editor_notebook_button_press), NULL);
+>>>>>>> 97c07e7e (geanyenv plugin, not fully working)
 
 	return TRUE;
 }
@@ -1466,6 +1639,13 @@ static void ga_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
                        G_GNUC_UNUSED gpointer data)
 {
 	running = FALSE;
+
+	if (editor_nb_handler_id)
+	{
+		g_signal_handler_disconnect(geany_data->main_widgets->notebook,
+		                            editor_nb_handler_id);
+		editor_nb_handler_id = 0;
+	}
 
 	if (agent_term)
 	{

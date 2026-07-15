@@ -37,6 +37,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <termios.h>
 #include <sys/wait.h>
 #include <glib.h>
 #include <gtk/gtk.h>
@@ -81,6 +82,7 @@ static gboolean     active       = FALSE; /* set FALSE during cleanup to stop re
 
 static GKeyFile  *tools_config    = NULL; /* merged user + project filetypetools.conf */
 static GtkWidget *tools_menu_item = NULL; /* "File Tools" entry appended to Tools menu */
+static gulong     window_key_handler_id = 0; /* handler ID for main-window key intercept */
 
 
 /* ------------------------------------------------------------------ */
@@ -230,16 +232,40 @@ static gboolean on_vte_key_press(GtkWidget *widget,
                                   gpointer user_data)
 {
     (void)widget;
-    TermTab *tab = user_data;
+    (void)user_data;
+    /* Per-tab key handler — reserved for future per-tab shortcuts.
+     * Ctrl+C / Ctrl+X interception is handled at the window level in
+     * on_window_key_press() because Geany's accelerators (Edit>Copy,
+     * Edit>Cut) consume these keys before GTK propagates them here. */
+    (void)event;
+    return FALSE;
+}
 
-    /* Ctrl+C without Shift → send ETX (interrupt).  We must handle this here
-     * because Geany's global Edit>Copy accelerator intercepts Ctrl+C before
-     * the VTE widget's own key-press-event handler runs. */
+/* Window-level key handler.  Connected to the main Geany window so we run
+ * before the window's own default handler processes accelerators.
+ * Only acts when a VTE terminal has keyboard focus. */
+static gboolean on_window_key_press(GtkWidget *window,
+                                     GdkEventKey *event,
+                                     G_GNUC_UNUSED gpointer data)
+{
+    GtkWidget *focused = gtk_window_get_focus(GTK_WINDOW(window));
+    if (!focused || !VTE_IS_TERMINAL(focused))
+        return FALSE;
+
+    /* Ctrl+C without Shift → send ETX (interrupt). */
     if ((event->state & GDK_CONTROL_MASK) &&
         !(event->state & (GDK_SHIFT_MASK | GDK_MOD1_MASK)) &&
         (event->keyval == GDK_KEY_c || event->keyval == GDK_KEY_C))
     {
-        vte_terminal_feed_child(tab->vte, "\x03", 1);
+        vte_terminal_feed_child(VTE_TERMINAL(focused), "\x03", 1);
+        return TRUE;
+    }
+    /* Ctrl+X without Shift → send CAN (0x18). */
+    if ((event->state & GDK_CONTROL_MASK) &&
+        !(event->state & (GDK_SHIFT_MASK | GDK_MOD1_MASK)) &&
+        (event->keyval == GDK_KEY_x || event->keyval == GDK_KEY_X))
+    {
+        vte_terminal_feed_child(VTE_TERMINAL(focused), "\x18", 1);
         return TRUE;
     }
     return FALSE;
@@ -281,8 +307,18 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 static void on_stop_btn_clicked(G_GNUC_UNUSED GtkButton *btn, gpointer user_data)
 {
     TermTab *tab = user_data;
-    if (tab->child_pid > 0)
-        kill(-getpgid((pid_t)tab->child_pid), SIGINT);
+    /* Use the PTY's foreground process group — this is the process actually
+     * running in the terminal (not the shell itself, which ignores SIGINT
+     * while waiting for a child). */
+    VtePty *pty = vte_terminal_get_pty(tab->vte);
+    if (!pty)
+        return;
+    int fd = vte_pty_get_fd(pty);
+    if (fd < 0)
+        return;
+    pid_t fg = tcgetpgrp(fd);
+    if (fg > 0)
+        kill(-fg, SIGINT);
 }
 
 /* name=NULL → auto-label "Term N"; non-NULL → use that string as tab label. */
@@ -412,6 +448,37 @@ static void on_ipc_signal(G_GNUC_UNUSED GObject *obj,
 G_MODULE_EXPORT void geanycli_run_command(const gchar *cmd, gboolean new_tab)
 {
     do_run_command(cmd, new_tab);
+}
+
+/* Feed cmd to every open terminal tab (used for env-var export propagation) */
+static void do_run_all_tabs(const gchar *cmd)
+{
+    if (!cmd || !*cmd || !term_nb)
+        return;
+    gint n = gtk_notebook_get_n_pages(term_nb);
+    for (gint i = 0; i < n; i++) {
+        GtkWidget *pg = gtk_notebook_get_nth_page(term_nb, i);
+        if (!pg) continue;
+        TermTab *tab = g_object_get_data(G_OBJECT(pg), "termtab");
+        if (!tab || !tab->child_pid) continue;
+        vte_terminal_feed_child(tab->vte, "\x15", 1);
+        vte_terminal_feed_child(tab->vte, cmd, -1);
+        vte_terminal_feed_child(tab->vte, "\n", 1);
+    }
+}
+
+/* Signal handler — other plugins emit "geanycli-run-all-tabs" on geany->object */
+static void on_ipc_all_signal(G_GNUC_UNUSED GObject *obj,
+                               const gchar *cmd,
+                               G_GNUC_UNUSED gpointer data)
+{
+    do_run_all_tabs(cmd);
+}
+
+/* Exported symbol — feed cmd to every terminal tab */
+G_MODULE_EXPORT void geanycli_run_all_tabs(const gchar *cmd)
+{
+    do_run_all_tabs(cmd);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1030,6 +1097,15 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
                           G_CALLBACK(on_project_close), NULL);
 
+    /* Intercept Ctrl+C / Ctrl+X at the window level so we run before Geany's
+     * accelerators (Edit>Copy, Edit>Cut) consume these keystrokes.
+     * We only act when a VTE terminal widget has keyboard focus. */
+    window_key_handler_id = g_signal_connect(
+        geany_data->main_widgets->window,
+        "key-press-event",
+        G_CALLBACK(on_window_key_press),
+        NULL);
+
     /* Register IPC signals on the Geany application object.
      * g_signal_lookup guards against duplicate registration on reload. */
     GType obj_type = G_OBJECT_TYPE(geany->object);
@@ -1047,6 +1123,21 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     plugin_signal_connect(plugin, geany->object,
                           "geanycli-run-command", FALSE,
                           G_CALLBACK(on_ipc_signal), NULL);
+
+    /* geanycli-run-all-tabs: feed a command to every open terminal tab */
+    if (!g_signal_lookup("geanycli-run-all-tabs", obj_type))
+        g_signal_new("geanycli-run-all-tabs",
+                     obj_type,
+                     G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL,
+                     g_cclosure_marshal_generic,
+                     G_TYPE_NONE,
+                     1,
+                     G_TYPE_STRING); /* cmd */
+
+    plugin_signal_connect(plugin, geany->object,
+                          "geanycli-run-all-tabs", FALSE,
+                          G_CALLBACK(on_ipc_all_signal), NULL);
 
     /* geanycli-run-file: look up filepath in filetypetools.conf and run tool_0 */
     if (!g_signal_lookup("geanycli-run-file", obj_type))
@@ -1088,6 +1179,13 @@ static void gt_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
                        G_GNUC_UNUSED gpointer data)
 {
     active = FALSE;
+
+    /* Disconnect the window-level key interceptor. */
+    if (window_key_handler_id) {
+        g_signal_handler_disconnect(geany_data->main_widgets->window,
+                                    window_key_handler_id);
+        window_key_handler_id = 0;
+    }
 
     /* Disconnect child-exited signals and free TermTab structs before the
      * notebook widget tree is destroyed by gtk_notebook_remove_page. */

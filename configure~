@@ -686,6 +686,11 @@ ENABLE_TABLECONVERT_FALSE
 ENABLE_TABLECONVERT_TRUE
 ENABLE_TREEBROWSER_FALSE
 ENABLE_TREEBROWSER_TRUE
+<<<<<<< HEAD
+=======
+ENABLE_JACOCOCOVERAGE_FALSE
+ENABLE_JACOCOCOVERAGE_TRUE
+>>>>>>> 97c07e7e (geanyenv plugin, not fully working)
 ENABLE_SPELLCHECK_FALSE
 ENABLE_SPELLCHECK_TRUE
 HAVE_ENCHANT_2_0_FALSE
@@ -765,6 +770,8 @@ ENABLE_LINUXRECTSELECT_FALSE
 ENABLE_LINUXRECTSELECT_TRUE
 LINUXRECTSELECT_LIBS
 LINUXRECTSELECT_CFLAGS
+ENABLE_GEANYENV_FALSE
+ENABLE_GEANYENV_TRUE
 ENABLE_GEANYAGENT_FALSE
 ENABLE_GEANYAGENT_TRUE
 ENABLE_GENIUSPASTE_FALSE
@@ -1046,6 +1053,7 @@ with_gpgme_prefix
 enable_largefile
 enable_geniuspaste
 enable_geanyagent
+enable_geanyenv
 enable_linuxrectselect
 enable_geanycli
 enable_geanycontrol
@@ -1822,6 +1830,7 @@ Optional Features:
   --disable-largefile     omit support for large files
   --disable-geniuspaste   Do not build the GeniusPaste plugin
   --disable-geanyagent    Do not build the Geanyagent plugin
+  --disable-geanyenv      Do not build the Geanyenv plugin
   --disable-linuxrectselect
                           Do not build the LinuxRectSelect plugin
   --disable-geanycli      Do not build the Geanycli plugin
@@ -1851,6 +1860,11 @@ Optional Features:
   --disable-sendmail      Do not build the Sendmail plugin
   --disable-shiftcolumn   Do not build the ShiftColumn plugin
   --disable-spellcheck    Do not build the spellcheck plugin
+<<<<<<< HEAD
+=======
+  --disable-jacococoverage
+                          Do not build the Jacococoverage plugin
+>>>>>>> 97c07e7e (geanyenv plugin, not fully working)
   --disable-treebrowser   Do not build the Treebrowser plugin
   --disable-tableconvert  Do not build the Tableconvert plugin
   --disable-updatechecker Do not build the Updatechecker plugin
@@ -21379,6 +21393,46 @@ fi
 
 
 
+    # Check whether --enable-geanyenv was given.
+if test ${enable_geanyenv+y}
+then :
+  enableval=$enable_geanyenv; enable_geanyenv=$enableval
+else $as_nop
+  case $gp_enable_all in #(
+  no) :
+    enable_geanyenv=no ;; #(
+  yes) :
+    enable_geanyenv=yes ;; #(
+  *) :
+    enable_geanyenv=auto ;;
+esac
+fi
+
+
+
+        if test "$enable_geanyenv" = "auto"; then
+        enable_geanyenv=yes
+    fi
+     if test "$enable_geanyenv" = yes; then
+  ENABLE_GEANYENV_TRUE=
+  ENABLE_GEANYENV_FALSE='#'
+else
+  ENABLE_GEANYENV_TRUE='#'
+  ENABLE_GEANYENV_FALSE=
+fi
+
+
+    plugins_statusmsg="${plugins_statusmsg}Geanyenv:$enable_geanyenv
+"
+
+
+    ac_config_files="$ac_config_files geanyenv/Makefile geanyenv/src/Makefile"
+
+
+
+
+
+
     # Check whether --enable-linuxrectselect was given.
 if test ${enable_linuxrectselect+y}
 then :
@@ -25068,6 +25122,49 @@ fi
 
 
 
+<<<<<<< HEAD
+=======
+    # Check whether --enable-jacococoverage was given.
+if test ${enable_jacococoverage+y}
+then :
+  enableval=$enable_jacococoverage; enable_jacococoverage=$enableval
+else $as_nop
+  case $gp_enable_all in #(
+  no) :
+    enable_jacococoverage=no ;; #(
+  yes) :
+    enable_jacococoverage=yes ;; #(
+  *) :
+    enable_jacococoverage=auto ;;
+esac
+fi
+
+
+
+        if test "$enable_jacococoverage" = "auto"; then
+        enable_jacococoverage=yes
+    fi
+     if test "$enable_jacococoverage" = yes; then
+  ENABLE_JACOCOCOVERAGE_TRUE=
+  ENABLE_JACOCOCOVERAGE_FALSE='#'
+else
+  ENABLE_JACOCOCOVERAGE_TRUE='#'
+  ENABLE_JACOCOCOVERAGE_FALSE=
+fi
+
+
+    plugins_statusmsg="${plugins_statusmsg}Jacococoverage:$enable_jacococoverage
+"
+
+
+    ac_config_files="$ac_config_files jacococoverage/Makefile jacococoverage/src/Makefile"
+
+
+
+
+
+
+>>>>>>> 97c07e7e (geanyenv plugin, not fully working)
     # Check whether --enable-treebrowser was given.
 if test ${enable_treebrowser+y}
 then :
@@ -26522,6 +26619,10 @@ if test -z "${ENABLE_GEANYAGENT_TRUE}" && test -z "${ENABLE_GEANYAGENT_FALSE}"; 
   as_fn_error $? "conditional \"ENABLE_GEANYAGENT\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
+if test -z "${ENABLE_GEANYENV_TRUE}" && test -z "${ENABLE_GEANYENV_FALSE}"; then
+  as_fn_error $? "conditional \"ENABLE_GEANYENV\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
 if test -z "${ENABLE_LINUXRECTSELECT_TRUE}" && test -z "${ENABLE_LINUXRECTSELECT_FALSE}"; then
   as_fn_error $? "conditional \"ENABLE_LINUXRECTSELECT\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
@@ -26622,6 +26723,13 @@ if test -z "${ENABLE_SPELLCHECK_TRUE}" && test -z "${ENABLE_SPELLCHECK_FALSE}"; 
   as_fn_error $? "conditional \"ENABLE_SPELLCHECK\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
+<<<<<<< HEAD
+=======
+if test -z "${ENABLE_JACOCOCOVERAGE_TRUE}" && test -z "${ENABLE_JACOCOCOVERAGE_FALSE}"; then
+  as_fn_error $? "conditional \"ENABLE_JACOCOCOVERAGE\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+>>>>>>> 97c07e7e (geanyenv plugin, not fully working)
 if test -z "${ENABLE_TREEBROWSER_TRUE}" && test -z "${ENABLE_TREEBROWSER_FALSE}"; then
   as_fn_error $? "conditional \"ENABLE_TREEBROWSER\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
@@ -27600,6 +27708,8 @@ do
     "geniuspaste/src/Makefile") CONFIG_FILES="$CONFIG_FILES geniuspaste/src/Makefile" ;;
     "geanyagent/Makefile") CONFIG_FILES="$CONFIG_FILES geanyagent/Makefile" ;;
     "geanyagent/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyagent/src/Makefile" ;;
+    "geanyenv/Makefile") CONFIG_FILES="$CONFIG_FILES geanyenv/Makefile" ;;
+    "geanyenv/src/Makefile") CONFIG_FILES="$CONFIG_FILES geanyenv/src/Makefile" ;;
     "linuxrectselect/Makefile") CONFIG_FILES="$CONFIG_FILES linuxrectselect/Makefile" ;;
     "linuxrectselect/src/Makefile") CONFIG_FILES="$CONFIG_FILES linuxrectselect/src/Makefile" ;;
     "geanycli/Makefile") CONFIG_FILES="$CONFIG_FILES geanycli/Makefile" ;;

@@ -19,10 +19,25 @@
  *                          (gpointer *)&fn))
  *          fn("make clean", FALSE);
  *
- * Parameters for both mechanisms:
+ * Parameters for geanycli-run-command / geanycli_run_command:
  *   cmd     – shell command string to execute
  *   new_tab – TRUE  : open a new terminal tab, run cmd there
  *             FALSE : run cmd in the currently active terminal tab
+ *
+ * To feed a command to EVERY open terminal tab (e.g. export an env var):
+ *
+ *   Signal:
+ *      g_signal_emit_by_name(geany->object,
+ *                            "geanycli-run-all-tabs",
+ *                            "export JAVA_HOME=/opt/java/21");
+ *
+ *   Direct call:
+ *      typedef void (*GtRunAllFn)(const gchar *);
+ *      GtRunAllFn fn;
+ *      if (g_module_symbol(terminal_plugin->module,
+ *                          "geanycli_run_all_tabs",
+ *                          (gpointer *)&fn))
+ *          fn("export JAVA_HOME=/opt/java/21");
  */
 
 #ifndef GEANYCLI_H
@@ -31,5 +46,6 @@
 #include <glib.h>
 
 void geanycli_run_command(const gchar *cmd, gboolean new_tab);
+void geanycli_run_all_tabs(const gchar *cmd);
 
 #endif /* GEANYCLI_H */

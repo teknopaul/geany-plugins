@@ -19,9 +19,9 @@
 GeanyPlugin  *geany_plugin;
 GeanyData    *geany_data;
 
-/* SCI_SETRECTANGULARSELECTIONMODIFIER is not in older Scintilla headers */
+/* Message number changed from 2550 (old Scintilla) to 2598 (Scintilla 5.x / Geany 2.x) */
 #ifndef SCI_SETRECTANGULARSELECTIONMODIFIER
-# define SCI_SETRECTANGULARSELECTIONMODIFIER 2550
+# define SCI_SETRECTANGULARSELECTIONMODIFIER 2598
 #endif
 #ifndef SCMOD_CTRL
 # define SCMOD_CTRL  2

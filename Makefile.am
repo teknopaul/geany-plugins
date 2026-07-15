@@ -99,6 +99,10 @@ if ENABLE_GEANYAGENT
 SUBDIRS += geanyagent
 endif
 
+if ENABLE_GEANYENV
+SUBDIRS += geanyenv
+endif
+
 if ENABLE_LINUXRECTSELECT
 SUBDIRS += linuxrectselect
 endif
