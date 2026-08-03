@@ -1,0 +1,111 @@
+#!/bin/sh
+# geany-progress — Send plan progress updates to the geanyprogress Geany plugin
+#
+# Usage:
+#   geany-progress init [-f plan_file] "Plan Name" "Phase 1" "Phase 2" ...
+#   geany-progress done N [-r file[:line]]... [-w "warning"]...
+#   geany-progress status
+#
+# File naming convention:
+#   Plans:    .planning/plans/xxxx_PLAN.md
+#   Progress: .planning/state/xxxx_PROGRESS.md
+#
+# The -f flag passes the plan file path to the plugin so "Open plan" works
+# in the sidebar context menu.  Relative paths are resolved against the
+# project root.
+#
+# Requires: nc (netcat) or socat; GEANY_PROGRESS_SOCK must be set.
+# Add the plugin directory to PATH in geany.env to make this available
+# inside geanycli/geanyagent terminals.
+
+set -e
+
+SOCK="${GEANY_PROGRESS_SOCK:-}"
+
+if [ -z "$SOCK" ]; then
+    echo "geany-progress: GEANY_PROGRESS_SOCK is not set" >&2
+    exit 1
+fi
+
+_send() {
+    if command -v nc >/dev/null 2>&1; then
+        printf '%s' "$1" | nc -U "$SOCK"
+    elif command -v socat >/dev/null 2>&1; then
+        printf '%s' "$1" | socat - "UNIX-CONNECT:$SOCK"
+    else
+        echo "geany-progress: need nc or socat" >&2
+        exit 1
+    fi
+}
+
+_json_str() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+cmd="$1"
+shift || true
+
+case "$cmd" in
+  init)
+    plan_file=""
+    if [ "$1" = "-f" ]; then
+        plan_file="$2"
+        shift 2
+    fi
+    plan_name="$1"
+    shift
+    json="{\"plan\":\"$(_json_str "$plan_name")\""
+    if [ -n "$plan_file" ]; then
+        json="${json},\"plan_file\":\"$(_json_str "$plan_file")\""
+    fi
+    json="${json},\"phases\":["
+    sep=""
+    for phase in "$@"; do
+        json="${json}${sep}\"$(_json_str "$phase")\""
+        sep=","
+    done
+    json="${json}]}"
+    _send "$json"
+    ;;
+  done)
+    n="$1"; shift
+    files_json=""; warnings_json=""; fsep=""; wsep=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+          -r)
+            entry="$2"; shift 2
+            fpath="${entry%%:*}"
+            fline="${entry##*:}"
+            if [ "$fpath" = "$fline" ]; then
+                # No colon — no line number
+                files_json="${files_json}${fsep}{\"path\":\"$(_json_str "$fpath")\"}"
+            else
+                files_json="${files_json}${fsep}{\"path\":\"$(_json_str "$fpath")\",\"line\":${fline}}"
+            fi
+            fsep=","
+            ;;
+          -w)
+            warnings_json="${warnings_json}${wsep}\"$(_json_str "$2")\""
+            wsep=","
+            shift 2
+            ;;
+          *) shift ;;
+        esac
+    done
+    json="{\"phase\":${n},\"status\":\"complete\""
+    [ -n "$files_json" ]    && json="${json},\"files\":[${files_json}]"
+    [ -n "$warnings_json" ] && json="${json},\"warnings\":[${warnings_json}]"
+    json="${json}}"
+    _send "$json"
+    ;;
+  status)
+    echo "GEANY_PROGRESS_SOCK=$SOCK"
+    ls -la "$SOCK" 2>/dev/null || echo "(socket not found)"
+    ;;
+  *)
+    echo "Usage: geany-progress init [-f plan_file] <plan> [phases...]" >&2
+    echo "       geany-progress done N [-r file[:line]]... [-w \"warning\"]..." >&2
+    echo "       geany-progress status" >&2
+    exit 1
+    ;;
+esac

@@ -681,7 +681,15 @@ static void run_server_command(const gchar *cmd)
     /* Try IPC signal to geanycli first */
     GType obj_type = G_OBJECT_TYPE(geany->object);
     if (g_signal_lookup("geanycli-run-command", obj_type)) {
-        g_signal_emit_by_name(geany->object, "geanycli-run-command", cmd, TRUE);
+        /* Save the current message-window page (Servers tab) so we can restore
+         * it after: geanycli always switches to the terminal tab, and we want
+         * server commands to run there silently without stealing focus. */
+        GtkNotebook *msgnb = GTK_NOTEBOOK(
+            geany_data->main_widgets->message_window_notebook);
+        gint saved = gtk_notebook_get_current_page(msgnb);
+        g_signal_emit_by_name(geany->object, "geanycli-run-command", cmd, FALSE);
+        if (saved >= 0)
+            gtk_notebook_set_current_page(msgnb, saved);
         return;
     }
 

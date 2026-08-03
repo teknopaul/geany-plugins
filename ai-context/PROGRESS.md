@@ -1,3 +1,25 @@
+# geanyprogress — AI Agent Plan Progress Panel
+
+## Status
+
+| Phase | Description                              | Status  |
+|-------|------------------------------------------|---------|
+| 1     | Plugin scaffold & build system           | complete |
+| 2     | Unix domain socket server                | complete |
+| 3     | JSON parsing + in-memory model           | complete |
+| 4     | GTK panel UI                             | complete |
+| 5     | Persistence (.planning/state/)           | complete |
+| 6     | geanyenv integration + helper script     | complete |
+
+## Notes
+
+- Plan document: `ai-context/geanyprogress-plan.md`
+- Architecture: Unix domain socket at `/tmp/geany-progress-<PID>.sock`, env var `GEANY_PROGRESS_SOCK`
+- To resume after `/clear`:
+  "Continue geanyprogress Phase N per ai-context/geanyprogress-plan.md. Current progress is in ai-context/PROGRESS.md."
+
+---
+
 # geanyvosk — Implementation Progress
 
 ## Status

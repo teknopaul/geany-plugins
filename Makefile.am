@@ -103,6 +103,10 @@ if ENABLE_GEANYENV
 SUBDIRS += geanyenv
 endif
 
+if ENABLE_GEANYPROGRESS
+SUBDIRS += geanyprogress
+endif
+
 if ENABLE_LINUXRECTSELECT
 SUBDIRS += linuxrectselect
 endif

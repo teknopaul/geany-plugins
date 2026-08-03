@@ -809,7 +809,7 @@ static const gchar *tools_find_section(const gchar *filepath)
     return g_key_file_has_group(tools_config, ".*") ? ".*" : NULL;
 }
 
-/* Expand %p %d %f %e %l in tmpl using filepath. Caller frees result.
+/* Expand %p %d %f %e %l %r %F in tmpl using filepath. Caller frees result.
  * When filepath is a directory, %d expands to the directory itself (not its parent). */
 static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 {
@@ -828,6 +828,12 @@ static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 
     gchar *root = get_work_dir();
 
+    /* %F: filepath relative to project root; falls back to absolute path */
+    const gchar *rel = filepath;
+    gsize root_len = strlen(root);
+    if (g_str_has_prefix(filepath, root) && filepath[root_len] == '/')
+        rel = filepath + root_len + 1;
+
     for (const gchar *p = tmpl; *p; p++) {
         if (*p != '%' || !*(p + 1)) {
             g_string_append_c(out, *p);
@@ -841,6 +847,7 @@ static gchar *tools_format_cmd(const gchar *tmpl, const gchar *filepath)
             case 'e': g_string_append(out, stem);              break;
             case 'l': g_string_append_printf(out, "%d", line); break;
             case 'r': g_string_append(out, root);              break;
+            case 'F': g_string_append(out, rel);               break;
             case '%': g_string_append_c(out, '%');             break;
             default:
                 g_string_append_c(out, '%');
