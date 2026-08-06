@@ -28,29 +28,7 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=21
-FILE_NAME_0=2250;None;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyvosk%2FREADME;0;4
-FILE_NAME_1=5234;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyvosk%2Fcheatsheet.md;0;4
-FILE_NAME_2=734;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Funrecognised-words.prompt.md;0;4
-FILE_NAME_3=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Ffind-files.plan.md;0;4
-FILE_NAME_4=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-context%2Ftreebrowser-voice-handoff.md;0;4
-FILE_NAME_5=176;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fvosk-features.md;0;4
-FILE_NAME_6=910;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeanyspeach.md;0;4
-FILE_NAME_7=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fcompiler_output.prompt.md;0;4
-FILE_NAME_8=623;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeany-control-api.md;0;4
-FILE_NAME_9=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeany-control-api.plan.md;0;4
-FILE_NAME_10=1464;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeneral-features-todo.md;0;4
-FILE_NAME_11=9808;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Ftreebrowser%2Fsrc%2Ftreebrowser.c;0;4
-FILE_NAME_12=51793;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fgeanyagent%2Fsrc%2Fgeanyagent.c;0;4
-FILE_NAME_13=14425;C;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Flsp%2Fsrc%2Flsp-symbol-tree.c;0;4
-FILE_NAME_14=378;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-context%2FPROGRESS.md;0;4
-FILE_NAME_15=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-context%2Fgeanyprogress-plan.md;0;4
-FILE_NAME_16=871;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeanyprogress-extensions.prompt.md;0;4
-FILE_NAME_17=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fprogress-pannel.prompt.md;0;4
-FILE_NAME_18=6876;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2F.claude%2Fskills%2Fgeany-progress%2FSKILL.md;0;4
-FILE_NAME_19=222;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fcode-tools.md.prompt.md;0;4
-FILE_NAME_20=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2F.claude%2Fskills%2Fopus-exec%2FSKILL.md;0;4
-FILE_NAME_21=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2F.claude%2Fskills%2Fopus-plan%2FSKILL.md;0;4
+current_page=0
 
 [VTE]
 last_dir=/home/teknopaul

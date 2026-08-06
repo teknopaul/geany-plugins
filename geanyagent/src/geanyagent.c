@@ -1550,6 +1550,32 @@ static void on_geanycontrol_send_to_agent(G_GNUC_UNUSED GObject *obj,
 #endif
 }
 
+/* Insert text into the agent input line (no newline), switch to the agent
+ * tab, and grab focus.  Emitted by geanyprogress for opus-exec actions. */
+static void on_insert_to_agent_signal(G_GNUC_UNUSED GObject *obj,
+                                       const gchar *text,
+                                       G_GNUC_UNUSED gpointer data)
+{
+	if (!agent_term || !text || !*text)
+		return;
+	if (tab_index >= 0)
+		gtk_notebook_set_current_page(
+		    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
+		    tab_index);
+#if VTE_CHECK_VERSION(0, 70, 0)
+	VtePty *pty = vte_terminal_get_pty(agent_term);
+	if (pty) {
+		int fd = vte_pty_get_fd(pty);
+		write(fd, "\x15", 1);
+		write(fd, text, strlen(text));
+	}
+#else
+	vte_terminal_feed_child(agent_term, "\x15", 1);
+	vte_terminal_feed_child(agent_term, text, (gssize)strlen(text));
+#endif
+	g_idle_add(grab_agent_focus_idle, NULL);
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Plugin lifecycle                                                    */
@@ -1613,6 +1639,12 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
 	plugin_signal_connect(plugin, geany->object, "geanyagent-new-prompt",
 	                      FALSE, G_CALLBACK(on_signal_new_prompt), NULL);
+
+	if (!g_signal_lookup("geanyagent-insert-to-agent", obj_type))
+		g_signal_new("geanyagent-insert-to-agent", obj_type, G_SIGNAL_RUN_LAST,
+		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+	plugin_signal_connect(plugin, geany->object, "geanyagent-insert-to-agent",
+	                      FALSE, G_CALLBACK(on_insert_to_agent_signal), NULL);
 
 	return TRUE;
 }

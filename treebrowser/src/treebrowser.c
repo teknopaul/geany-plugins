@@ -1544,6 +1544,44 @@ on_menu_show_bars(GtkMenuItem *menuitem, gpointer *user_data)
 	showbars(gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(menuitem)));
 }
 
+static gboolean
+fs_copy_recursive(const gchar *src_path, const gchar *dst_path, GError **error)
+{
+	if (g_file_test(src_path, G_FILE_TEST_IS_DIR))
+	{
+		if (g_mkdir_with_parents(dst_path, 0755) != 0)
+		{
+			g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+			            "Failed to create directory '%s'", dst_path);
+			return FALSE;
+		}
+		GDir *dir = g_dir_open(src_path, 0, error);
+		if (!dir)
+			return FALSE;
+		const gchar *name;
+		gboolean ok = TRUE;
+		while (ok && (name = g_dir_read_name(dir)) != NULL)
+		{
+			gchar *child_src = g_build_filename(src_path, name, NULL);
+			gchar *child_dst = g_build_filename(dst_path, name, NULL);
+			ok = fs_copy_recursive(child_src, child_dst, error);
+			g_free(child_src);
+			g_free(child_dst);
+		}
+		g_dir_close(dir);
+		return ok;
+	}
+	else
+	{
+		GFile *src = g_file_new_for_path(src_path);
+		GFile *dst = g_file_new_for_path(dst_path);
+		gboolean ok = g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, error);
+		g_object_unref(src);
+		g_object_unref(dst);
+		return ok;
+	}
+}
+
 static void
 on_menu_paste_file(G_GNUC_UNUSED GtkMenuItem *menuitem, gchar *target_dir)
 {
@@ -1563,20 +1601,25 @@ on_menu_paste_file(G_GNUC_UNUSED GtkMenuItem *menuitem, gchar *target_dir)
 		: g_build_filename(addressbar_last_address, clip_text, NULL);
 	g_free(clip_text);
 
-	if (!g_file_test(src_path, G_FILE_TEST_IS_REGULAR))
+	if (!g_file_test(src_path, G_FILE_TEST_EXISTS))
 	{
-		ui_set_statusbar(TRUE, _("Clipboard does not contain a valid file path: %s"), src_path);
+		ui_set_statusbar(TRUE, _("Clipboard does not contain a valid path: %s"), src_path);
 		g_free(src_path);
 		return;
 	}
 
+	gboolean src_is_dir = g_file_test(src_path, G_FILE_TEST_IS_DIR);
 	gchar *basename  = g_path_get_basename(src_path);
 	gchar *dest_path = g_build_filename(target_dir, basename, NULL);
 	g_free(basename);
 
 	if (g_file_test(dest_path, G_FILE_TEST_EXISTS))
 	{
-		if (!dialogs_show_question(_("'%s' already exists.\nDo you want to overwrite it?"), dest_path))
+		if (!dialogs_show_question(
+		        src_is_dir
+		            ? _("'%s' already exists.\nDo you want to overwrite it?")
+		            : _("'%s' already exists.\nDo you want to overwrite it?"),
+		        dest_path))
 		{
 			g_free(dest_path);
 			g_free(src_path);
@@ -1584,11 +1627,8 @@ on_menu_paste_file(G_GNUC_UNUSED GtkMenuItem *menuitem, gchar *target_dir)
 		}
 	}
 
-	GFile  *src   = g_file_new_for_path(src_path);
-	GFile  *dst   = g_file_new_for_path(dest_path);
 	GError *error = NULL;
-
-	if (!g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error))
+	if (!fs_copy_recursive(src_path, dest_path, &error))
 	{
 		ui_set_statusbar(TRUE, _("Failed to copy '%s': %s"), src_path, error->message);
 		g_error_free(error);
@@ -1598,8 +1638,6 @@ on_menu_paste_file(G_GNUC_UNUSED GtkMenuItem *menuitem, gchar *target_dir)
 		on_menu_refresh(NULL, NULL);
 	}
 
-	g_object_unref(src);
-	g_object_unref(dst);
 	g_free(src_path);
 	g_free(dest_path);
 }
@@ -1731,14 +1769,23 @@ create_popup_menu(const gchar *name, const gchar *uri)
 	gtk_container_add(GTK_CONTAINER(menu), item);
 	g_signal_connect(item, "activate", G_CALLBACK(on_menu_create_new_object), (gpointer)"file");
 
+#if GTK_CHECK_VERSION(3, 10, 0)
+	item = ui_image_menu_item_new("edit-copy", _("_Copy"));
+#else
+	item = ui_image_menu_item_new(GTK_STOCK_COPY, _("_Copy"));
+#endif
+	gtk_container_add(GTK_CONTAINER(menu), item);
+	g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_copy_uri), g_strdup(uri), (GClosureNotify)g_free, 0);
+	gtk_widget_set_sensitive(item, is_exists);
+
 	{
 		gchar *paste_dir = (!uri || !*uri)
 			? g_strdup(addressbar_last_address)
 			: is_dir ? g_strdup(uri) : g_path_get_dirname(uri);
 #if GTK_CHECK_VERSION(3, 10, 0)
-		item = ui_image_menu_item_new("edit-paste", _("Paste _File"));
+		item = ui_image_menu_item_new("edit-paste", _("_Paste"));
 #else
-		item = ui_image_menu_item_new(GTK_STOCK_PASTE, _("Paste _File"));
+		item = ui_image_menu_item_new(GTK_STOCK_PASTE, _("_Paste"));
 #endif
 		gtk_container_add(GTK_CONTAINER(menu), item);
 		g_signal_connect_data(item, "activate", G_CALLBACK(on_menu_paste_file),
@@ -2144,7 +2191,12 @@ on_treeview_row_activated(GtkWidget *widget, GtkTreePath *path, GtkTreeViewColum
 				gtk_tree_view_expand_row(GTK_TREE_VIEW(widget), path, FALSE);
 			}
 	else {
-		document_open_file(uri, FALSE, NULL, NULL);
+		GeanyDocument *cur  = document_get_current();
+		GeanyDocument *doc  = document_find_by_filename(uri);
+		if (doc && doc == cur)
+			document_reload_force(doc, NULL);
+		else
+			document_open_file(uri, FALSE, NULL, NULL);
 		if (CONFIG_ON_OPEN_FOCUS_EDITOR)
 			keybindings_send_command(GEANY_KEY_GROUP_FOCUS, GEANY_KEYS_FOCUS_EDITOR);
 	}

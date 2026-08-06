@@ -592,6 +592,74 @@ static void on_open_review_files_clicked(G_GNUC_UNUSED GtkMenuItem *item,
         open_file_at_line(ph->files[i].path, ph->files[i].line);
 }
 
+/* ------------------------------------------------------------------ */
+/* Relative path helper                                                 */
+
+static gchar *plan_file_rel_path(void)
+{
+    if (!current_plan.plan_file)
+        return NULL;
+    GeanyApp *app = geany->app;
+    if (app->project && app->project->base_path) {
+        const gchar *base    = app->project->base_path;
+        gsize        baselen = strlen(base);
+        if (g_str_has_prefix(current_plan.plan_file, base)) {
+            const gchar *rel = current_plan.plan_file + baselen;
+            while (*rel == G_DIR_SEPARATOR)
+                rel++;
+            if (*rel)
+                return g_strdup(rel);
+        }
+    }
+    return g_strdup(current_plan.plan_file);
+}
+
+static void emit_insert_to_agent(const gchar *text)
+{
+    GType obj_type = G_OBJECT_TYPE(geany->object);
+    if (!g_signal_lookup("geanyagent-insert-to-agent", obj_type))
+        g_signal_new("geanyagent-insert-to-agent", obj_type, G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+    g_signal_emit_by_name(geany->object, "geanyagent-insert-to-agent", text);
+}
+
+static void on_insert_opus_exec_clicked(G_GNUC_UNUSED GtkMenuItem *item,
+                                         G_GNUC_UNUSED gpointer data)
+{
+    gchar *rel = plan_file_rel_path();
+    if (!rel)
+        return;
+    gchar *cmd = g_strdup_printf("/opus-exec %s", rel);
+    g_free(rel);
+    emit_insert_to_agent(cmd);
+    g_free(cmd);
+}
+
+static void on_copy_plan_path_clicked(G_GNUC_UNUSED GtkMenuItem *item,
+                                       G_GNUC_UNUSED gpointer data)
+{
+    gchar *rel = plan_file_rel_path();
+    if (!rel)
+        return;
+    GtkClipboard *clip = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+    gtk_clipboard_set_text(clip, rel, -1);
+    g_free(rel);
+}
+
+static void on_continue_phase_clicked(G_GNUC_UNUSED GtkMenuItem *item,
+                                       gpointer data)
+{
+    gint phase_idx = GPOINTER_TO_INT(data);
+    gchar *rel = plan_file_rel_path();
+    if (!rel)
+        return;
+    gchar *cmd = g_strdup_printf("/opus-exec %s continue phase %d",
+                                  rel, phase_idx + 1);
+    g_free(rel);
+    emit_insert_to_agent(cmd);
+    g_free(cmd);
+}
+
 static void on_load_clicked(G_GNUC_UNUSED GtkMenuItem *item,
                              G_GNUC_UNUSED gpointer data)
 {
@@ -709,6 +777,28 @@ static void show_context_menu(GdkEventButton *event)
     item = gtk_menu_item_new_with_label("Load...");
     g_signal_connect(item, "activate", G_CALLBACK(on_load_clicked), NULL);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+    item = gtk_menu_item_new_with_label("Run with opus-exec");
+    gtk_widget_set_sensitive(item, current_plan.plan_file != NULL);
+    g_signal_connect(item, "activate", G_CALLBACK(on_insert_opus_exec_clicked), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+
+    item = gtk_menu_item_new_with_label("Copy plan path");
+    gtk_widget_set_sensitive(item, current_plan.plan_file != NULL);
+    g_signal_connect(item, "activate", G_CALLBACK(on_copy_plan_path_clicked), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+
+    if (phase_pending && current_plan.plan_file) {
+        gchar *label = g_strdup_printf("Continue phase %d", ctx_phase_idx + 1);
+        item = gtk_menu_item_new_with_label(label);
+        g_free(label);
+        g_signal_connect_data(item, "activate",
+                              G_CALLBACK(on_continue_phase_clicked),
+                              GINT_TO_POINTER(ctx_phase_idx), NULL, 0);
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+    }
 
     gtk_widget_show_all(menu);
     gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
