@@ -434,10 +434,12 @@ on_row_activated(GtkTreeView *tv, GtkTreePath *path,
 	if (gtk_tree_model_iter_parent(model, &parent, &iter))
 		gtk_tree_model_get(model, &parent, COL_NAME, &pkg, -1);
 
-	/* JaCoCo CSV stores packages with '/' separators already */
-	gchar *query = (pkg && *pkg)
-	    ? g_strdup_printf("%s/%s.java", pkg, name)
+	/* JaCoCo CSV uses '.' as package separators; locate needs '/' */
+	gchar *pkg_path = pkg ? g_strdelimit(g_strdup(pkg), ".", '/') : NULL;
+	gchar *query = (pkg_path && *pkg_path)
+	    ? g_strdup_printf("%s/%s.java", pkg_path, name)
 	    : g_strdup_printf("%s.java", name);
+	g_free(pkg_path);
 
 	g_free(name);
 	g_free(pkg);
