@@ -623,6 +623,27 @@ static void emit_insert_to_agent(const gchar *text)
     g_signal_emit_by_name(geany->object, "geanyagent-insert-to-agent", text);
 }
 
+static void emit_run_in_agent(const gchar *text)
+{
+    GType obj_type = G_OBJECT_TYPE(geany->object);
+    if (!g_signal_lookup("geanyagent-run-in-agent", obj_type))
+        g_signal_new("geanyagent-run-in-agent", obj_type, G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+    g_signal_emit_by_name(geany->object, "geanyagent-run-in-agent", text);
+}
+
+static void on_run_opus_exec_clicked(G_GNUC_UNUSED GtkMenuItem *item,
+                                      G_GNUC_UNUSED gpointer data)
+{
+    gchar *rel = plan_file_rel_path();
+    if (!rel)
+        return;
+    gchar *cmd = g_strdup_printf("/opus-exec %s", rel);
+    g_free(rel);
+    emit_run_in_agent(cmd);
+    g_free(cmd);
+}
+
 static void on_insert_opus_exec_clicked(G_GNUC_UNUSED GtkMenuItem *item,
                                          G_GNUC_UNUSED gpointer data)
 {
@@ -653,10 +674,9 @@ static void on_continue_phase_clicked(G_GNUC_UNUSED GtkMenuItem *item,
     gchar *rel = plan_file_rel_path();
     if (!rel)
         return;
-    gchar *cmd = g_strdup_printf("/opus-exec %s continue phase %d",
-                                  rel, phase_idx + 1);
+    gchar *cmd = g_strdup_printf("/opus-exec %s %d", rel, phase_idx + 1);
     g_free(rel);
-    emit_insert_to_agent(cmd);
+    emit_run_in_agent(cmd);
     g_free(cmd);
 }
 
@@ -782,16 +802,11 @@ static void show_context_menu(GdkEventButton *event)
 
     item = gtk_menu_item_new_with_label("Run with opus-exec");
     gtk_widget_set_sensitive(item, current_plan.plan_file != NULL);
-    g_signal_connect(item, "activate", G_CALLBACK(on_insert_opus_exec_clicked), NULL);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
-
-    item = gtk_menu_item_new_with_label("Copy plan path");
-    gtk_widget_set_sensitive(item, current_plan.plan_file != NULL);
-    g_signal_connect(item, "activate", G_CALLBACK(on_copy_plan_path_clicked), NULL);
+    g_signal_connect(item, "activate", G_CALLBACK(on_run_opus_exec_clicked), NULL);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
     if (phase_pending && current_plan.plan_file) {
-        gchar *label = g_strdup_printf("Continue phase %d", ctx_phase_idx + 1);
+        gchar *label = g_strdup_printf("Run opus-exec from phase %d", ctx_phase_idx + 1);
         item = gtk_menu_item_new_with_label(label);
         g_free(label);
         g_signal_connect_data(item, "activate",
@@ -799,6 +814,16 @@ static void show_context_menu(GdkEventButton *event)
                               GINT_TO_POINTER(ctx_phase_idx), NULL, 0);
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     }
+
+    item = gtk_menu_item_new_with_label("Prepare in agent");
+    gtk_widget_set_sensitive(item, current_plan.plan_file != NULL);
+    g_signal_connect(item, "activate", G_CALLBACK(on_insert_opus_exec_clicked), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+
+    item = gtk_menu_item_new_with_label("Copy plan path");
+    gtk_widget_set_sensitive(item, current_plan.plan_file != NULL);
+    g_signal_connect(item, "activate", G_CALLBACK(on_copy_plan_path_clicked), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
     gtk_widget_show_all(menu);
     gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);

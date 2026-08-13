@@ -1022,6 +1022,16 @@ static void on_switch_agent_activate(GtkMenuItem *item, gpointer user_data)
 		ga_switch_agent(*idx);
 }
 
+static void on_send_to_cli_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+	const gchar *text = (const gchar *)user_data;
+	if (!text || !*text)
+		return;
+	GType obj_type = G_OBJECT_TYPE(geany->object);
+	if (g_signal_lookup("geanycli-feed-text", obj_type))
+		g_signal_emit_by_name(geany->object, "geanycli-feed-text", text);
+}
+
 static gboolean on_vte_button_press(GtkWidget *widget,
                                     GdkEventButton *event,
                                     G_GNUC_UNUSED gpointer data)
@@ -1034,6 +1044,7 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 
 	/* Capture selection to CLIPBOARD now, before the menu event loop may
 	 * clear VTE's selection state. */
+	gchar *sel_text = NULL;
 	if (has_sel)
 	{
 #if VTE_CHECK_VERSION(0, 50, 0)
@@ -1041,6 +1052,10 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 #else
 		vte_terminal_copy_clipboard(vte);
 #endif
+		GtkClipboard *sel_cb = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+		sel_text = gtk_clipboard_wait_for_text(sel_cb);
+		if (sel_text)
+			g_strstrip(sel_text);
 	}
 
 	GtkWidget *menu = gtk_menu_new();
@@ -1053,6 +1068,20 @@ static gboolean on_vte_button_press(GtkWidget *widget,
 	GtkWidget *paste_item = gtk_menu_item_new_with_label(_("Paste"));
 	g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
+
+	if (sel_text && *sel_text)
+	{
+		GType obj_type = G_OBJECT_TYPE(geany->object);
+		if (g_signal_lookup("geanycli-feed-text", obj_type))
+		{
+			GtkWidget *send_cli_item = gtk_menu_item_new_with_label(_("Send to CLI"));
+			g_signal_connect_data(send_cli_item, "activate",
+			                      G_CALLBACK(on_send_to_cli_activate),
+			                      g_strdup(sel_text), (GClosureNotify)g_free, 0);
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), send_cli_item);
+		}
+	}
+	g_free(sel_text);
 
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 
@@ -1576,6 +1605,21 @@ static void on_insert_to_agent_signal(G_GNUC_UNUSED GObject *obj,
 	g_idle_add(grab_agent_focus_idle, NULL);
 }
 
+/* Run a command in the agent (clears line, sends command + newline).
+ * Emitted by geanyprogress "Run with opus-exec" and "Continue phase N". */
+static void on_run_in_agent_signal(G_GNUC_UNUSED GObject *obj,
+                                    const gchar *text,
+                                    G_GNUC_UNUSED gpointer data)
+{
+	if (!agent_term || !text || !*text)
+		return;
+	if (tab_index >= 0)
+		gtk_notebook_set_current_page(
+		    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
+		    tab_index);
+	ga_run_agent_cmd(text);
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Plugin lifecycle                                                    */
@@ -1645,6 +1689,12 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
 	plugin_signal_connect(plugin, geany->object, "geanyagent-insert-to-agent",
 	                      FALSE, G_CALLBACK(on_insert_to_agent_signal), NULL);
+
+	if (!g_signal_lookup("geanyagent-run-in-agent", obj_type))
+		g_signal_new("geanyagent-run-in-agent", obj_type, G_SIGNAL_RUN_LAST,
+		             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+	plugin_signal_connect(plugin, geany->object, "geanyagent-run-in-agent",
+	                      FALSE, G_CALLBACK(on_run_in_agent_signal), NULL);
 
 	return TRUE;
 }

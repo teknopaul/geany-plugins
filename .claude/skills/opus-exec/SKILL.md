@@ -4,7 +4,7 @@ description: executing a plan written by opus-plan
 allowed-tools: java, bash
 ---
 
-Claude Opus writes phased delivery plans in `.planning/plans/xxxx_PLAN.md`.
+Claude Opus writes phased delivery plans in `.planning/plans/XXXX_PLAN.md`.
 
 Claude Sonnet should execute.  If the agent asked to execute is Opus it should stop
 and report this as an error.
@@ -14,8 +14,8 @@ The plan may also be provided as an attached document to the chat.
 
 ## File naming convention
 
-- Plans:    `.planning/plans/xxxx_PLAN.md`
-- Progress: `.planning/state/xxxx_PROGRESS.md`  (written by geanyprogress automatically)
+- Plans:    `.planning/plans/XXXX_PLAN.md`
+- Progress: `.planning/state/XXXX_PROGRESS.md`  (written by geanyprogress automatically)
 
 ## Start of execution
 
@@ -33,7 +33,7 @@ includes review files and warnings specific to that phase:
 geany-progress done N [-r path[:line]]... [-w "warning"]...
 ```
 
-The plugin writes `.planning/state/xxxx_PROGRESS.md` automatically after each call.
+The plugin writes `.planning/state/XXXX_PROGRESS.md` automatically after each call.
 
 If the context window reaches 80%, report the last completed phase number and wait for
 the human to `/clear` and continue with `/opus-exec` from the next phase.

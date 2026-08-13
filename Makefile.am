@@ -115,6 +115,10 @@ if ENABLE_GEANYCLI
 SUBDIRS += geanycli
 endif
 
+if ENABLE_GEANYLINEMOVE
+SUBDIRS += geanylinemove
+endif
+
 if ENABLE_GEANYCONTROL
 SUBDIRS += geanycontrol
 endif

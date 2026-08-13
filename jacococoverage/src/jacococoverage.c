@@ -404,6 +404,55 @@ on_refresh(GtkToolButton *btn, gpointer user_data)
 }
 
 /* -------------------------------------------------------------------------
+ * Row-activated: double-click / Enter on a class row → locate the source file
+ * ---------------------------------------------------------------------- */
+
+static void
+on_row_activated(GtkTreeView *tv, GtkTreePath *path,
+                 G_GNUC_UNUSED GtkTreeViewColumn *col,
+                 G_GNUC_UNUSED gpointer data)
+{
+	GtkTreeIter   iter, parent;
+	GtkTreeModel *model   = gtk_tree_view_get_model(tv);
+	gboolean      is_pkg  = FALSE;
+	gchar        *name    = NULL;
+
+	if (!gtk_tree_model_get_iter(model, &iter, path))
+		return;
+
+	gtk_tree_model_get(model, &iter,
+	                   COL_IS_PACKAGE, &is_pkg,
+	                   COL_NAME,       &name,
+	                   -1);
+
+	if (is_pkg || !name) {
+		g_free(name);
+		return;
+	}
+
+	gchar *pkg = NULL;
+	if (gtk_tree_model_iter_parent(model, &parent, &iter))
+		gtk_tree_model_get(model, &parent, COL_NAME, &pkg, -1);
+
+	/* JaCoCo CSV stores packages with '/' separators already */
+	gchar *query = (pkg && *pkg)
+	    ? g_strdup_printf("%s/%s.java", pkg, name)
+	    : g_strdup_printf("%s.java", name);
+
+	g_free(name);
+	g_free(pkg);
+
+	GType obj_type = G_OBJECT_TYPE(geany->object);
+	guint sig_id   = g_signal_lookup("locate-find-file", obj_type);
+	if (sig_id && g_signal_has_handler_pending(geany->object, sig_id, 0, FALSE))
+		g_signal_emit_by_name(geany->object, "locate-find-file", query);
+	else
+		ui_set_statusbar(FALSE, _("JaCoCo: locate plugin not loaded – path: %s"), query);
+
+	g_free(query);
+}
+
+/* -------------------------------------------------------------------------
  * Build the GtkTreeView widget
  * ---------------------------------------------------------------------- */
 
@@ -536,6 +585,7 @@ create_sidebar(void)
 
 	sidebar_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	treeview     = create_treeview();
+	g_signal_connect(treeview, "row-activated", G_CALLBACK(on_row_activated), NULL);
 	scrollwin    = gtk_scrolled_window_new(NULL, NULL);
 	path_entry   = gtk_entry_new();
 

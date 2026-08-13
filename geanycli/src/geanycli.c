@@ -195,6 +195,16 @@ static void on_paste_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_dat
     vte_terminal_paste_clipboard(VTE_TERMINAL(user_data));
 }
 
+static void on_send_to_agent_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+    const gchar *text = (const gchar *)user_data;
+    if (!text || !*text)
+        return;
+    GType obj_type = G_OBJECT_TYPE(geany->object);
+    if (g_signal_lookup("geanyagent-insert-to-agent", obj_type))
+        g_signal_emit_by_name(geany->object, "geanyagent-insert-to-agent", text);
+}
+
 static void on_rename_tab_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
 {
     TermTab *tab = user_data;
@@ -278,17 +288,51 @@ static gboolean on_vte_button_press(GtkWidget *widget,
     if (event->button != 3)
         return FALSE;
 
-    VteTerminal *vte  = VTE_TERMINAL(widget);
-    TermTab     *tab  = data;
-    GtkWidget   *menu = gtk_menu_new();
+    VteTerminal *vte     = VTE_TERMINAL(widget);
+    TermTab     *tab     = data;
+    gboolean     has_sel = vte_terminal_get_has_selection(vte);
+
+    if (has_sel)
+    {
+#if VTE_CHECK_VERSION(0, 50, 0)
+        vte_terminal_copy_clipboard_format(vte, VTE_FORMAT_TEXT);
+#else
+        vte_terminal_copy_clipboard(vte);
+#endif
+    }
+
+    GtkWidget *menu = gtk_menu_new();
 
     GtkWidget *copy_item = gtk_menu_item_new_with_label(_("Copy"));
+    gtk_widget_set_sensitive(copy_item, has_sel);
     g_signal_connect(copy_item, "activate", G_CALLBACK(on_copy_activate), vte);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), copy_item);
 
     GtkWidget *paste_item = gtk_menu_item_new_with_label(_("Paste"));
     g_signal_connect(paste_item, "activate", G_CALLBACK(on_paste_activate), vte);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_item);
+
+    if (has_sel)
+    {
+        GType obj_type = G_OBJECT_TYPE(geany->object);
+        if (g_signal_lookup("geanyagent-insert-to-agent", obj_type))
+        {
+            GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+            gchar        *clip_text = gtk_clipboard_wait_for_text(clipboard);
+            if (clip_text && *g_strstrip(clip_text))
+            {
+                GtkWidget *send_item = gtk_menu_item_new_with_label(_("Send to Agent"));
+                g_signal_connect_data(send_item, "activate",
+                                      G_CALLBACK(on_send_to_agent_activate),
+                                      clip_text, (GClosureNotify)g_free, 0);
+                gtk_menu_shell_append(GTK_MENU_SHELL(menu), send_item);
+            }
+            else
+                g_free(clip_text);
+        }
+    }
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 
     GtkWidget *rename_item = gtk_menu_item_new_with_label(_("Rename tab\xe2\x80\xa6"));
     g_signal_connect(rename_item, "activate", G_CALLBACK(on_rename_tab_activate), tab);
@@ -479,6 +523,45 @@ static void on_ipc_all_signal(G_GNUC_UNUSED GObject *obj,
 G_MODULE_EXPORT void geanycli_run_all_tabs(const gchar *cmd)
 {
     do_run_all_tabs(cmd);
+}
+
+/* Feed text to the active terminal tab without appending a newline. */
+static void do_feed_text(const gchar *text)
+{
+    if (!text || !*text || !term_nb)
+        return;
+
+    gint page = gtk_notebook_get_current_page(term_nb);
+    if (page < 0)
+        return;
+
+    GtkWidget *page_widget = gtk_notebook_get_nth_page(term_nb, page);
+    if (!page_widget)
+        return;
+
+    TermTab *tab = g_object_get_data(G_OBJECT(page_widget), "termtab");
+    if (!tab)
+        return;
+
+    if (outer_idx >= 0)
+        gtk_notebook_set_current_page(
+            GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
+            outer_idx);
+
+    vte_terminal_feed_child(tab->vte, text, -1);
+    gtk_widget_grab_focus(GTK_WIDGET(tab->vte));
+}
+
+static void on_ipc_feed_signal(G_GNUC_UNUSED GObject *obj,
+                               const gchar *text,
+                               G_GNUC_UNUSED gpointer data)
+{
+    do_feed_text(text);
+}
+
+G_MODULE_EXPORT void geanycli_feed_text(const gchar *text)
+{
+    do_feed_text(text);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1041,6 +1124,20 @@ static void on_project_open(G_GNUC_UNUSED GObject *obj,
     tools_config_load();
     GeanyDocument *doc = document_get_current();
     tools_menu_populate(doc ? doc->file_name : NULL);
+
+    gchar *wd = get_work_dir();
+    if (!wd)
+        return;
+
+    TermTab *root_tab = find_tab_by_name("./");
+    if (root_tab) {
+        gchar *cmd = g_strdup_printf("cd '%s'\n", wd);
+        vte_terminal_feed_child(root_tab->vte, cmd, -1);
+        g_free(cmd);
+    } else {
+        create_tab(NULL, "./");
+    }
+    g_free(wd);
 }
 
 static void on_project_close(G_GNUC_UNUSED GObject *obj,
@@ -1083,8 +1180,8 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
         GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
         outer_widget, tab_label);
 
-    /* First terminal tab */
-    create_tab(NULL, NULL);
+    /* First terminal tab — always named "./" so project-open can find it */
+    create_tab(NULL, "./");
 
     /* File-type tools menu */
     tools_config_load();
@@ -1178,6 +1275,21 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     plugin_signal_connect(plugin, geany->object,
                           "geanycli-append-tools", FALSE,
                           G_CALLBACK(on_append_tools_signal), NULL);
+
+    /* geanycli-feed-text: insert text into the active terminal without executing */
+    if (!g_signal_lookup("geanycli-feed-text", obj_type))
+        g_signal_new("geanycli-feed-text",
+                     obj_type,
+                     G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL,
+                     g_cclosure_marshal_generic,
+                     G_TYPE_NONE,
+                     1,
+                     G_TYPE_STRING); /* text */
+
+    plugin_signal_connect(plugin, geany->object,
+                          "geanycli-feed-text", FALSE,
+                          G_CALLBACK(on_ipc_feed_signal), NULL);
 
     return TRUE;
 }

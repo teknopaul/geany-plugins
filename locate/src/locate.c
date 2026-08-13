@@ -362,9 +362,8 @@ static void on_find_file_activate(G_GNUC_UNUSED GtkMenuItem *item,
 static void on_updatedb_activate(G_GNUC_UNUSED GtkMenuItem *item,
                                   G_GNUC_UNUSED gpointer data)
 {
-    const gchar *cmd = "sudo updatedb";
-    gulong id = g_signal_lookup("geanycli-run-command",
-                                G_OBJECT_TYPE(geany->object));
+    const gchar *cmd = "sudo /usr/bin/updatedb";
+    gulong id = g_signal_lookup("geanycli-run-command", G_OBJECT_TYPE(geany->object));
     if (id != 0 && g_signal_has_handler_pending(geany->object, id, 0, FALSE))
         g_signal_emit_by_name(geany->object, "geanycli-run-command", cmd, TRUE);
     else
@@ -402,6 +401,20 @@ static void kb_find_file(G_GNUC_UNUSED guint key_id)
 }
 
 /* ------------------------------------------------------------------ */
+/* IPC: "locate-find-file" signal                                      */
+
+static void on_locate_find_file_signal(G_GNUC_UNUSED GObject *obj,
+                                        const gchar *query,
+                                        G_GNUC_UNUSED gpointer data)
+{
+    locate_dialog_show();
+    if (entry_query && query && *query) {
+        gtk_entry_set_text(GTK_ENTRY(entry_query), query);
+        locate_run_search();
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Plugin lifecycle                                                    */
 
 static gboolean gl_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
@@ -429,6 +442,15 @@ static gboolean gl_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     key_group = plugin_set_key_group(geany_plugin, "locate", KB_COUNT, NULL);
     keybindings_set_item(key_group, KB_FIND_FILE, kb_find_file,
                          0, 0, "find_file", _("Find File"), menu_item_find);
+
+    GType obj_type = G_OBJECT_TYPE(geany->object);
+    if (!g_signal_lookup("locate-find-file", obj_type))
+        g_signal_new("locate-find-file", obj_type, G_SIGNAL_RUN_LAST,
+                     0, NULL, NULL,
+                     g_cclosure_marshal_VOID__STRING,
+                     G_TYPE_NONE, 1, G_TYPE_STRING);
+    plugin_signal_connect(plugin, geany->object, "locate-find-file", FALSE,
+                          G_CALLBACK(on_locate_find_file_signal), NULL);
 
     return TRUE;
 }
