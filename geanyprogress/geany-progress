@@ -46,6 +46,56 @@ cmd="$1"
 shift || true
 
 case "$cmd" in
+  -h|--help|help)
+    cat <<'EOF'
+geany-progress — Send plan progress updates to the geanyprogress Geany plugin
+
+USAGE
+  geany-progress init [-f plan_file] <plan_name> [phase1 phase2 ...]
+  geany-progress done <N> [-r file[:line]]... [-w "warning"]...
+  geany-progress status
+  geany-progress --help
+
+COMMANDS
+  init    Register a new plan and its phases with the Geany sidebar.
+            -f plan_file   Path to the plan file (.planning/plans/xxxx_PLAN.md).
+                           Enables "Open plan" in the sidebar context menu.
+            plan_name      Display name shown in the sidebar.
+            phase1 ...     One argument per phase, in execution order.
+
+          Example:
+            geany-progress init -f .planning/plans/0001_PLAN.md \
+              "Add login" "Design schema" "Write tests" "Implement"
+
+  done    Mark phase N (1-based) as complete. Optionally attach changed files
+          and/or warning messages shown in the sidebar.
+            N              Phase number (1 = first phase passed to init).
+            -r file[:line] Reference a changed file, with optional line number.
+                           May be repeated.
+            -w "text"      Warning message to display in the sidebar.
+                           May be repeated.
+
+          Example:
+            geany-progress done 2 -r src/auth.c:42 -r src/auth.h \
+              -w "migration required"
+
+  status  Print the socket path and check whether it exists.
+
+ENVIRONMENT
+  GEANY_PROGRESS_SOCK   Path to the Unix domain socket exposed by the plugin.
+                        Must be set before calling any command (except --help).
+
+NOTES
+  Requires nc (netcat) or socat to send messages over the Unix socket.
+  Add the geanyprogress directory to PATH via geany.env so this script is
+  available inside geanycli/geanyagent terminals.
+
+  File naming convention:
+    Plans:    .planning/plans/xxxx_PLAN.md
+    Progress: .planning/state/xxxx_PROGRESS.md
+EOF
+    exit 0
+    ;;
   init)
     plan_file=""
     if [ "$1" = "-f" ]; then
