@@ -805,11 +805,13 @@ static void on_new_instance_activate(G_GNUC_UNUSED GtkMenuItem *item,
 {
     GError *error = NULL;
     const gchar *argv[] = { "geany", "--new-instance", NULL };
-    if (!g_spawn_async(NULL, (gchar **)argv, NULL, G_SPAWN_SEARCH_PATH,
+    gchar **envp = g_environ_unsetenv(g_get_environ(), "GEANY_PROGRESS_SOCK");
+    if (!g_spawn_async(NULL, (gchar **)argv, envp, G_SPAWN_SEARCH_PATH,
                        NULL, NULL, NULL, &error)) {
         g_warning("geanycontrol: failed to open new instance: %s", error->message);
         g_error_free(error);
     }
+    g_strfreev(envp);
 }
 
 static void open_test_dialog(G_GNUC_UNUSED GtkMenuItem *item, G_GNUC_UNUSED gpointer d)
