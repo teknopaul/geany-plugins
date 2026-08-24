@@ -691,6 +691,7 @@ static GtkWidget *skill_entry    = NULL;
 static GtkWidget *prompt_entry   = NULL;
 static GtkWidget *tools_sep      = NULL;
 static GtkWidget *tools_item     = NULL;
+static GtkWidget *file_item      = NULL;
 
 static void test_run(const gchar *cmd)
 {
@@ -797,6 +798,18 @@ static GtkWidget *section_label(const gchar *title)
     gtk_widget_set_halign(lbl, GTK_ALIGN_START);
     gtk_widget_set_margin_top(lbl, 8);
     return lbl;
+}
+
+static void on_new_instance_activate(G_GNUC_UNUSED GtkMenuItem *item,
+                                     G_GNUC_UNUSED gpointer data)
+{
+    GError *error = NULL;
+    const gchar *argv[] = { "geany", "--new-instance", NULL };
+    if (!g_spawn_async(NULL, (gchar **)argv, NULL, G_SPAWN_SEARCH_PATH,
+                       NULL, NULL, NULL, &error)) {
+        g_warning("geanycontrol: failed to open new instance: %s", error->message);
+        g_error_free(error);
+    }
 }
 
 static void open_test_dialog(G_GNUC_UNUSED GtkMenuItem *item, G_GNUC_UNUSED gpointer d)
@@ -969,6 +982,18 @@ static gboolean gc_init(GeanyPlugin *plugin,
     gtk_menu_shell_append(GTK_MENU_SHELL(geany_data->main_widgets->tools_menu), tools_item);
     g_signal_connect(tools_item, "activate", G_CALLBACK(open_test_dialog), NULL);
 
+    GtkWidget *quit_item = ui_lookup_widget(geany->main_widgets->window, "menu_quit1");
+    if (quit_item) {
+        GtkWidget *file_menu = gtk_widget_get_parent(quit_item);
+        GList *children = gtk_container_get_children(GTK_CONTAINER(file_menu));
+        gint pos = g_list_index(children, quit_item);
+        g_list_free(children);
+        file_item = gtk_menu_item_new_with_label(_("New Window"));
+        gtk_widget_show(file_item);
+        gtk_menu_shell_insert(GTK_MENU_SHELL(file_menu), file_item, pos);
+        g_signal_connect(file_item, "activate", G_CALLBACK(on_new_instance_activate), NULL);
+    }
+
     gc_register_signals();
 
     plugin_signal_connect(plugin, geany->object, "geanycontrol-open-file", FALSE,
@@ -995,6 +1020,7 @@ static void gc_cleanup(GeanyPlugin *plugin G_GNUC_UNUSED,
     if (test_window) { gtk_widget_destroy(test_window); test_window = NULL; }
     if (tools_item)  { gtk_widget_destroy(tools_item);  tools_item  = NULL; }
     if (tools_sep)   { gtk_widget_destroy(tools_sep);   tools_sep   = NULL; }
+    if (file_item)   { gtk_widget_destroy(file_item);   file_item   = NULL; }
     if (socket_service) {
         g_socket_service_stop(socket_service);
         g_clear_object(&socket_service);
