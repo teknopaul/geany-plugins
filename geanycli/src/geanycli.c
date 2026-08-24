@@ -82,11 +82,30 @@ static gboolean     active       = FALSE; /* set FALSE during cleanup to stop re
 
 static GKeyFile  *tools_config    = NULL; /* merged user + project filetypetools.conf */
 static GtkWidget *tools_menu_item = NULL; /* "File Tools" entry appended to Tools menu */
-static gulong     window_key_handler_id = 0; /* handler ID for main-window key intercept */
+static gulong     window_key_handler_id  = 0; /* handler ID for main-window key intercept */
+static gulong     msg_nb_switch_handler  = 0; /* handler ID for message-notebook page switch */
 
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
+
+static void on_msg_nb_switch_page(G_GNUC_UNUSED GtkNotebook *nb,
+                                  G_GNUC_UNUSED GtkWidget   *page,
+                                  guint                      page_num,
+                                  G_GNUC_UNUSED gpointer     data)
+{
+    if ((gint)page_num != outer_idx || !term_nb)
+        return;
+    gint inner = gtk_notebook_get_current_page(term_nb);
+    if (inner < 0)
+        return;
+    GtkWidget *inner_page = gtk_notebook_get_nth_page(term_nb, inner);
+    if (!inner_page)
+        return;
+    TermTab *tab = g_object_get_data(G_OBJECT(inner_page), "termtab");
+    if (tab)
+        gtk_widget_grab_focus(GTK_WIDGET(tab->vte));
+}
 
 static gchar *get_work_dir(void)
 {
@@ -1201,6 +1220,13 @@ static gboolean gt_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
     plugin_signal_connect(plugin, geany->object, "project-close", FALSE,
                           G_CALLBACK(on_project_close), NULL);
 
+    /* Auto-focus the active VTE terminal when the CLI tab is switched to */
+    msg_nb_switch_handler = g_signal_connect(
+        geany_data->main_widgets->message_window_notebook,
+        "switch-page",
+        G_CALLBACK(on_msg_nb_switch_page),
+        NULL);
+
     /* Intercept Ctrl+C / Ctrl+X at the window level so we run before Geany's
      * accelerators (Edit>Copy, Edit>Cut) consume these keystrokes.
      * We only act when a VTE terminal widget has keyboard focus. */
@@ -1304,6 +1330,13 @@ static void gt_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
         g_signal_handler_disconnect(geany_data->main_widgets->window,
                                     window_key_handler_id);
         window_key_handler_id = 0;
+    }
+
+    if (msg_nb_switch_handler) {
+        g_signal_handler_disconnect(
+            geany_data->main_widgets->message_window_notebook,
+            msg_nb_switch_handler);
+        msg_nb_switch_handler = 0;
     }
 
     /* Disconnect child-exited signals and free TermTab structs before the

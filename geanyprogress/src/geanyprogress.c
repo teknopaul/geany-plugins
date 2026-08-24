@@ -549,6 +549,9 @@ static void open_file_at_line(const gchar *path, gint line)
 
     if (doc && line > 0)
         sci_goto_line(doc->editor->sci, line - 1, TRUE);
+
+    if (doc)
+        keybindings_send_command(GEANY_KEY_GROUP_FOCUS, GEANY_KEYS_FOCUS_EDITOR);
 }
 
 static void open_in_editor(const gchar *path)

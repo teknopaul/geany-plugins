@@ -446,6 +446,7 @@ static void ga_create_prompt(const gchar *name)
 		utils_write_file(prompt_path, "");
 
 	document_open_file(prompt_path, FALSE, NULL, NULL);
+	keybindings_send_command(GEANY_KEY_GROUP_FOCUS, GEANY_KEYS_FOCUS_EDITOR);
 
 	g_free(prompt_path);
 	g_free(filename);
@@ -632,6 +633,12 @@ static void ga_switch_agent(gint index)
 	/* Unblock after the event queue has drained any pending child-exited */
 	g_idle_add(ga_unblock_child_exited_idle, NULL);
 
+	/* Bring the agent tab to front and grab focus */
+	if (tab_index >= 0)
+		gtk_notebook_set_current_page(
+		    GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
+		    tab_index);
+	g_idle_add(grab_agent_focus_idle, NULL);
 }
 
 /* Kill the running agent and let on_child_exited trigger a fresh respawn.
