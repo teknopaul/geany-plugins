@@ -27,7 +27,7 @@ The plugin listens on a Unix domain socket. Its path is exported as `GEANY_PROGR
 in the Geany process environment — every terminal opened inside Geany (geanycli,
 geanyagent, VTE) inherits this variable automatically.
 
-Two JSON message types:
+Three JSON message types:
 
 ```
 # Register (or replace) a plan — plan_file is optional but enables "Open plan"
@@ -37,7 +37,27 @@ Two JSON message types:
 {"phase":1,"status":"complete",
  "files":[{"path":"src/foo.c","line":42},{"path":"src/bar.h"}],
  "warnings":["Possible memory leak on error path","Check timeout handling"]}
+
+# Query current plan state — plugin responds with JSON on the same connection
+{"query":"state"}
 ```
+
+Query response format:
+```json
+{
+  "plan": "Plan Name",
+  "plan_file": ".planning/plans/PLAN_NAME_PLAN.md",
+  "progress_file": "/abs/path/.planning/state/PLAN_NAME_PROGRESS.md",
+  "phases": [
+    {"index": 1, "name": "Phase 1", "done": true},
+    {"index": 2, "name": "Phase 2", "done": false}
+  ],
+  "next_phase": 2
+}
+```
+
+`next_phase` is the 1-based index of the first pending phase, `0` if all phases are
+done, or `null` if no plan is active.
 
 `files` and `warnings` are optional. When present:
 - **files** — clicking the completed phase row in the sidebar opens each file at the given line
@@ -53,6 +73,7 @@ Messages are sent by writing to the socket with `nc -U` or `socat`.
 ```sh
 geany-progress init [-f plan_file] "Plan Name" "Phase 1" "Phase 2" "Phase 3"
 geany-progress done N [-r file[:line]]... [-w "warning"]...
+geany-progress query
 geany-progress status
 ```
 
@@ -176,6 +197,19 @@ from `$ARGUMENTS` directly to `geany-progress done`.
 Examples:
 - `/geany-progress done 2`
 - `/geany-progress done 3 -r src/engine.c:117 -w "Review error handling"`
+
+### `query`
+
+Run `geany-progress query` to ask the plugin for its current plan state and print
+the JSON response. This is the primary way for agents to auto-discover what plan is
+active and which phase to start from — e.g. when `/opus-exec` is invoked with no
+arguments.
+
+```sh
+state=$(geany-progress query)
+echo "$state"
+# {"plan":"My Task","plan_file":".planning/plans/MY_TASK_PLAN.md",...,"next_phase":3}
+```
 
 ### `status`
 

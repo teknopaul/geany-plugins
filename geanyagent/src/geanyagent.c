@@ -20,6 +20,8 @@
 #include <termios.h>
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <gio/gio.h>
+#include <gio/gunixsocketaddress.h>
 #include <gtk/gtk.h>
 #include <vte/vte.h>
 
@@ -37,6 +39,9 @@ static GtkWidget   *agent_label = NULL;
 static gint         tab_index   = -1;
 static gboolean     running     = FALSE;  /* FALSE during cleanup to suppress restart */
 static GPid         agent_pid   = 0;      /* child PID, 0 when not running */
+
+static GSocketService *agent_sock_service = NULL;
+static gchar          *agent_sock_path    = NULL;
 
 static gchar *config_file  = NULL;
 static gchar *search_url   = NULL;
@@ -56,6 +61,11 @@ static gint       active_agent = 0;
 static gboolean use_askpass = FALSE;  /* opt-in; disabled by default */
 static gchar   *askpass_dir  = NULL;
 static gchar   *askpass_prog = NULL;
+
+static gboolean focus_on_stop = TRUE;   /* persisted in config */
+
+static GtkWidget *focus_event_box = NULL;
+static GtkWidget *focus_label     = NULL;
 
 #define DEFAULT_CMD "claude"
 
@@ -209,6 +219,77 @@ static gboolean grab_agent_focus_idle(G_GNUC_UNUSED gpointer data)
 		gtk_widget_grab_focus(GTK_WIDGET(agent_term));
 	return G_SOURCE_REMOVE;
 }
+
+
+/* ------------------------------------------------------------------ */
+/* Agent Unix socket — receives {\"event\":\"stop\"} from Claude hooks  */
+
+static gboolean on_agent_sock_incoming(G_GNUC_UNUSED GSocketService *svc,
+                                        GSocketConnection *conn,
+                                        G_GNUC_UNUSED GObject *src,
+                                        G_GNUC_UNUSED gpointer data)
+{
+    GInputStream *in = g_io_stream_get_input_stream(G_IO_STREAM(conn));
+    gchar buf[512];
+    gssize n = g_input_stream_read(in, buf, sizeof(buf) - 1, NULL, NULL);
+    if (n <= 0)
+        return TRUE;
+    buf[n] = '\0';
+
+    if (strstr(buf, "\"stop\"") && focus_on_stop && agent_term) {
+        if (tab_index >= 0)
+            gtk_notebook_set_current_page(
+                GTK_NOTEBOOK(geany_data->main_widgets->message_window_notebook),
+                tab_index);
+        g_idle_add(grab_agent_focus_idle, NULL);
+    }
+    return TRUE;
+}
+
+static gboolean agent_socket_init(void)
+{
+    agent_sock_path = g_strdup_printf("/tmp/geany-agent-%d.sock", (int)getpid());
+    GSocketAddress *addr = g_unix_socket_address_new(agent_sock_path);
+    agent_sock_service = g_socket_service_new();
+
+    GError *err = NULL;
+    if (!g_socket_listener_add_address(G_SOCKET_LISTENER(agent_sock_service),
+                                       addr, G_SOCKET_TYPE_STREAM,
+                                       G_SOCKET_PROTOCOL_DEFAULT,
+                                       NULL, NULL, &err)) {
+        g_warning("geanyagent: socket bind failed: %s", err->message);
+        g_error_free(err);
+        g_object_unref(addr);
+        g_object_unref(agent_sock_service);
+        agent_sock_service = NULL;
+        g_free(agent_sock_path);
+        agent_sock_path = NULL;
+        return FALSE;
+    }
+    g_object_unref(addr);
+
+    g_signal_connect(agent_sock_service, "incoming",
+                     G_CALLBACK(on_agent_sock_incoming), NULL);
+    g_socket_service_start(agent_sock_service);
+    g_setenv("GEANY_AGENT_SOCK", agent_sock_path, TRUE);
+    return TRUE;
+}
+
+static void agent_socket_cleanup(void)
+{
+    if (agent_sock_service) {
+        g_socket_service_stop(agent_sock_service);
+        g_object_unref(agent_sock_service);
+        agent_sock_service = NULL;
+    }
+    if (agent_sock_path) {
+        unlink(agent_sock_path);
+        g_unsetenv("GEANY_AGENT_SOCK");
+        g_free(agent_sock_path);
+        agent_sock_path = NULL;
+    }
+}
+
 
 static void ga_send_command(const gchar *cmd)
 {
@@ -1302,6 +1383,10 @@ static void ga_load_config(void)
 		}
 
 		use_askpass = g_key_file_get_boolean(kf, "agent", "use_askpass", NULL);
+		if (g_key_file_has_key(kf, "agent", "focus_on_stop", NULL))
+			focus_on_stop = g_key_file_get_boolean(kf, "agent", "focus_on_stop", NULL);
+		else
+			focus_on_stop = TRUE;
 		gchar *su = g_key_file_get_string(kf, "agent", "search_url", NULL);
 		if (su)
 		{
@@ -1359,14 +1444,67 @@ static void ga_save_config(void)
 	g_key_file_set_string(kf, "agent", "active", active->key);
 
 	/* Legacy single cmd field for backward compat */
-	g_key_file_set_string(kf,  "agent", "cmd",        active->cmd);
-	g_key_file_set_boolean(kf, "agent", "use_askpass", use_askpass);
-	g_key_file_set_string(kf,  "agent", "search_url", search_url ? search_url : DEFAULT_SEARCH_URL);
+	g_key_file_set_string(kf,  "agent", "cmd",          active->cmd);
+	g_key_file_set_boolean(kf, "agent", "use_askpass",  use_askpass);
+	g_key_file_set_boolean(kf, "agent", "focus_on_stop", focus_on_stop);
+	g_key_file_set_string(kf,  "agent", "search_url",   search_url ? search_url : DEFAULT_SEARCH_URL);
 
 	data = g_key_file_to_data(kf, NULL, NULL);
 	utils_write_file(config_file, data);
 	g_free(data);
 	g_key_file_free(kf);
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Status-bar focus toggle                                             */
+
+static void focus_status_update(void)
+{
+    if (!focus_label)
+        return;
+    /* ⊙ = U+2299 CIRCLED DOT, ⊗ = U+2297 CIRCLED TIMES */
+    const gchar *sym   = focus_on_stop ? "\xe2\x8a\x99" : "\xe2\x8a\x97";
+    const gchar *color = focus_on_stop ? "#22aa22"       : "#666666";
+    gchar *markup = g_strdup_printf("<span foreground='%s'>%s</span>", color, sym);
+    gtk_label_set_markup(GTK_LABEL(focus_label), markup);
+    g_free(markup);
+}
+
+static gboolean on_focus_toggle_click(G_GNUC_UNUSED GtkWidget *w,
+                                       GdkEventButton *event,
+                                       G_GNUC_UNUSED gpointer data)
+{
+    if (event->button != 1)
+        return FALSE;
+    focus_on_stop = !focus_on_stop;
+    focus_status_update();
+    ga_save_config();
+    return TRUE;
+}
+
+static void create_focus_toggle(void)
+{
+    GtkWidget *pb = geany->main_widgets->progressbar;
+    if (!pb)
+        return;
+    GtkWidget *sb_box = gtk_widget_get_parent(pb);
+    if (!sb_box || !GTK_IS_BOX(sb_box))
+        return;
+
+    focus_label = gtk_label_new(NULL);
+    focus_status_update();
+    gtk_widget_show(focus_label);
+
+    focus_event_box = gtk_event_box_new();
+    gtk_container_add(GTK_CONTAINER(focus_event_box), focus_label);
+    gtk_widget_set_tooltip_text(focus_event_box,
+                                "Click to toggle auto-focus on agent response");
+    gtk_widget_show(focus_event_box);
+    gtk_box_pack_end(GTK_BOX(sb_box), focus_event_box, FALSE, FALSE, 4);
+
+    g_signal_connect(focus_event_box, "button-press-event",
+                     G_CALLBACK(on_focus_toggle_click), NULL);
 }
 
 
@@ -1378,6 +1516,7 @@ typedef struct {
 	GtkWidget *name_entry;
 	GtkWidget *cmd_entry;
 	GtkWidget *askpass_check;
+	GtkWidget *focus_check;
 	GtkWidget *search_url_entry;
 } ConfigWidgets;
 
@@ -1449,6 +1588,8 @@ static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
 			active_agent = idx;
 		}
 		use_askpass = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cw->askpass_check));
+		focus_on_stop = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cw->focus_check));
+		focus_status_update();
 		const gchar *new_url = gtk_entry_get_text(GTK_ENTRY(cw->search_url_entry));
 		g_free(search_url);
 		search_url  = g_strdup(new_url && *new_url ? new_url : DEFAULT_SEARCH_URL);
@@ -1508,6 +1649,17 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	    "issued by the agent show a graphical password dialog instead of prompting\n"
 	    "on the terminal. This prevents passwords appearing in command strings or history.");
 
+	cw->focus_check = gtk_check_button_new_with_label(
+	    _("Auto-focus agent tab when Claude finishes responding (Stop hook)"));
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cw->focus_check), focus_on_stop);
+	gtk_widget_set_tooltip_text(cw->focus_check,
+	    "When enabled and GEANY_AGENT_SOCK receives {\"event\":\"stop\"},\n"
+	    "the agent tab is brought to the front and focused so you can\n"
+	    "immediately type a reply.\n\n"
+	    "Hook entry for ~/.config/claude/settings.json:\n"
+	    "  \"Stop\": [{\"type\":\"command\",\"command\":\n"
+	    "    \"printf '{\\\"event\\\":\\\"stop\\\"}' | nc -U \\\"$GEANY_AGENT_SOCK\\\"\"}]");
+
 	GtkWidget *search_url_label = gtk_label_new(_("Search URL (%s = query):"));
 	gtk_widget_set_halign(search_url_label, GTK_ALIGN_START);
 	cw->search_url_entry = gtk_entry_new();
@@ -1527,6 +1679,7 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,     FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""), FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(vbox), cw->askpass_check,   FALSE, FALSE, 4);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->focus_check,     FALSE, FALSE, 4);
 	gtk_box_pack_start(GTK_BOX(vbox), search_url_label,    FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), cw->search_url_entry, FALSE, FALSE, 0);
 
@@ -1631,6 +1784,25 @@ static void on_run_in_agent_signal(G_GNUC_UNUSED GObject *obj,
 /* ------------------------------------------------------------------ */
 /* Plugin lifecycle                                                    */
 
+/*
+ * Claude Code Stop-hook integration
+ * ----------------------------------
+ * geanyagent listens on $GEANY_AGENT_SOCK (Unix domain socket).
+ * Add this to ~/.config/claude/settings.json to auto-focus Geany
+ * when Claude finishes responding:
+ *
+ *   "hooks": {
+ *     "Stop": [{
+ *       "type": "command",
+ *       "command": "printf '{\"event\":\"stop\"}' | nc -U \"$GEANY_AGENT_SOCK\" 2>/dev/null || true"
+ *     }]
+ *   }
+ *
+ * The hook must be silent (stdout/stderr suppressed) and fast.
+ * nc exits immediately after delivering the single message.
+ * The toggle in the status bar (⊙/⊗) and the plugin config dialog
+ * both control whether incoming stop events actually steal focus.
+ */
 static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 {
 	geany_plugin = plugin;
@@ -1647,6 +1819,8 @@ static gboolean ga_init(GeanyPlugin *plugin, G_GNUC_UNUSED gpointer data)
 	if (use_askpass)
 		setup_askpass();
 	create_agent_tab();
+	agent_socket_init();
+	create_focus_toggle();
 
 	running = TRUE;
 	g_idle_add(ga_spawn_idle, NULL);
@@ -1724,6 +1898,13 @@ static void ga_cleanup(G_GNUC_UNUSED GeanyPlugin *plugin,
 		                                     G_CALLBACK(on_child_exited), NULL);
 		agent_term = NULL;
 	}
+
+	if (focus_event_box) {
+		gtk_widget_destroy(focus_event_box);
+		focus_event_box = NULL;
+		focus_label     = NULL;
+	}
+	agent_socket_cleanup();
 
 	if (tab_index >= 0)
 	{

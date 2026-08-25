@@ -4,6 +4,7 @@
 # Usage:
 #   geany-progress init [-f plan_file] "Plan Name" "Phase 1" "Phase 2" ...
 #   geany-progress done N [-r file[:line]]... [-w "warning"]...
+#   geany-progress query
 #   geany-progress status
 #
 # File naming convention:
@@ -79,6 +80,14 @@ COMMANDS
             geany-progress done 2 -r src/auth.c:42 -r src/auth.h \
               -w "migration required"
 
+  query   Ask the plugin for its current plan state. Prints a JSON object:
+            {"plan":"Name","plan_file":"rel/path","progress_file":"/abs/path",
+             "phases":[{"index":1,"name":"...","done":true},...],
+             "next_phase":2}
+          next_phase is the 1-based index of the first pending phase,
+          0 if all phases are done, null if no active plan.
+          Use this to let agents auto-discover the plan and resume point.
+
   status  Print the socket path and check whether it exists.
 
 ENVIRONMENT
@@ -147,6 +156,9 @@ EOF
     [ -n "$warnings_json" ] && json="${json},\"warnings\":[${warnings_json}]"
     json="${json}}"
     _send "$json"
+    ;;
+  query)
+    _send '{"query":"state"}'
     ;;
   status)
     echo "GEANY_PROGRESS_SOCK=$SOCK"

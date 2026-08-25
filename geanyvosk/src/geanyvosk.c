@@ -25,10 +25,12 @@ GeanyData   *geany_data;
 /* Runtime config (loaded from ~/.config/geany/geanyvosk.conf)         */
 /* ------------------------------------------------------------------ */
 
-static gchar *cfg_model_path  = NULL;
-static gchar *cfg_alsa_device = NULL;
-static gchar *cfg_wake_word   = NULL;
-static gchar *cfg_deact_word  = NULL;
+static gchar *cfg_model_path   = NULL;
+static gchar *cfg_alsa_device  = NULL;
+static gchar *cfg_wake_word    = NULL;
+static gchar *cfg_deact_word   = NULL;
+static gchar *cfg_whisper_model = NULL;
+static gchar *cfg_whisper_cli   = NULL;
 
 static void load_config(void)
 {
@@ -37,10 +39,12 @@ static void load_config(void)
     GKeyFile *kf = g_key_file_new();
 
     if (g_key_file_load_from_file(kf, conf, G_KEY_FILE_NONE, NULL)) {
-        cfg_model_path  = g_key_file_get_string(kf, "geanyvosk", "model_path",  NULL);
-        cfg_alsa_device = g_key_file_get_string(kf, "geanyvosk", "alsa_device", NULL);
-        cfg_wake_word   = g_key_file_get_string(kf, "geanyvosk", "wake_word",   NULL);
-        cfg_deact_word  = g_key_file_get_string(kf, "geanyvosk", "deactivate_word", NULL);
+        cfg_model_path   = g_key_file_get_string(kf, "geanyvosk", "model_path",    NULL);
+        cfg_alsa_device  = g_key_file_get_string(kf, "geanyvosk", "alsa_device",  NULL);
+        cfg_wake_word    = g_key_file_get_string(kf, "geanyvosk", "wake_word",     NULL);
+        cfg_deact_word   = g_key_file_get_string(kf, "geanyvosk", "deactivate_word", NULL);
+        cfg_whisper_model = g_key_file_get_string(kf, "geanyvosk", "whisper_model", NULL);
+        cfg_whisper_cli   = g_key_file_get_string(kf, "geanyvosk", "whisper_cli",   NULL);
     }
 
     if (!cfg_model_path)
@@ -56,10 +60,12 @@ static void load_config(void)
 
 static void free_config(void)
 {
-    g_free(cfg_model_path);  cfg_model_path  = NULL;
-    g_free(cfg_alsa_device); cfg_alsa_device = NULL;
-    g_free(cfg_wake_word);   cfg_wake_word   = NULL;
-    g_free(cfg_deact_word);  cfg_deact_word  = NULL;
+    g_free(cfg_model_path);    cfg_model_path    = NULL;
+    g_free(cfg_alsa_device);   cfg_alsa_device   = NULL;
+    g_free(cfg_wake_word);     cfg_wake_word     = NULL;
+    g_free(cfg_deact_word);    cfg_deact_word    = NULL;
+    g_free(cfg_whisper_model); cfg_whisper_model = NULL;
+    g_free(cfg_whisper_cli);   cfg_whisper_cli   = NULL;
 }
 
 /* ------------------------------------------------------------------ */
@@ -90,6 +96,16 @@ static void voice_menu_reset_state(void);
    thread which owns the recognizer (avoids a data race on vosk_rec).
    0 = no change, 1 = wake-word grammar (idle), 2 = full free vocabulary. */
 static volatile gint pending_grm = 0;
+
+/* Whisper dictation globals (audio-thread-owned except whisper_dictating which is atomic) */
+static volatile gint whisper_dictating = 0;
+static GAsyncQueue  *wqueue      = NULL;
+static GThread      *wthread     = NULL;
+static gint16       *wbuf        = NULL;
+static gsize         wbuf_len    = 0;
+static gboolean      wbuf_speech = FALSE;
+static gint          wsilence    = 0;
+static gint          wchunk_id   = 0;
 #endif
 static GtkWidget *status_event_box  = NULL;
 static GtkWidget *status_box        = NULL;
@@ -813,17 +829,24 @@ static void vosk_handle_command(const gchar *text)
     /* Dictation mode: append speech to current document */
     if (dictate_mode) {
         if (strstr(text, "stop dictating")) {
+            /* If whisper is running, let audio thread discard the partial buffer
+               (it contains "stop dictating") by clearing the flag first. */
+            g_atomic_int_set(&whisper_dictating, 0);
             dictate_mode = FALSE;
             vosk_set_active(TRUE);  /* stay active, just leave dictation */
             return;
         }
-        dictate_insert(text);
+        /* When whisper is active, skip Vosk insertions — whisper handles text. */
+        if (!g_atomic_int_get(&whisper_dictating))
+            dictate_insert(text);
         return;
     }
 
     /* "dictate" / "start dictating" — enter dictation mode */
     if (strstr(text, "dictate") && !strstr(text, "stop")) {
         dictate_mode = TRUE;
+        if (cfg_whisper_model && wqueue)
+            g_atomic_int_set(&whisper_dictating, 1);
         set_voice_state(VSTATE_DICTATING);
         return;
     }
@@ -1285,6 +1308,169 @@ static gboolean on_status_icon_click(GtkWidget *widget, GdkEventButton *event,
 #endif /* HAVE_VOSK */
 
 /* ------------------------------------------------------------------ */
+/* Whisper dictation — high-quality offline ASR via whisper-cli        */
+/* ------------------------------------------------------------------ */
+
+#ifdef HAVE_VOSK
+
+#define WHISPER_BUF_SECS      30
+#define WHISPER_BUF_FRAMES    (SAMPLE_RATE * WHISPER_BUF_SECS)
+/* Silence: sum-of-squares / n < 600^2 = 360000 (avoids linking -lm) */
+#define WHISPER_SILENCE_RMS2  360000LL
+/* 800 ms of consecutive silence before flushing */
+#define WHISPER_SILENCE_FRAMES (SAMPLE_RATE * 4 / 5)
+
+static gboolean is_silent_chunk(const gint16 *buf, gsize n)
+{
+    gint64 sum = 0;
+    for (gsize i = 0; i < n; i++)
+        sum += (gint64)buf[i] * buf[i];
+    return sum < WHISPER_SILENCE_RMS2 * (gint64)n;
+}
+
+static gboolean wav_write(const gchar *path, const gint16 *pcm, gsize n_frames)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) return FALSE;
+
+    guint32 data_bytes = (guint32)(n_frames * 2);
+    guint32 chunk_sz   = 36 + data_bytes;
+    guint32 sr         = SAMPLE_RATE;
+    guint32 byte_rate  = SAMPLE_RATE * 2;
+    guint32 fmt_sz     = 16;
+    guint16 pcm_fmt    = 1;
+    guint16 channels   = 1;
+    guint16 block_align = 2;
+    guint16 bits       = 16;
+
+    fwrite("RIFF", 1, 4, f);
+    fwrite(&chunk_sz,    4, 1, f);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    fwrite(&fmt_sz,      4, 1, f);
+    fwrite(&pcm_fmt,     2, 1, f);
+    fwrite(&channels,    2, 1, f);
+    fwrite(&sr,          4, 1, f);
+    fwrite(&byte_rate,   4, 1, f);
+    fwrite(&block_align, 2, 1, f);
+    fwrite(&bits,        2, 1, f);
+    fwrite("data", 1, 4, f);
+    fwrite(&data_bytes,  4, 1, f);
+    fwrite(pcm, 2, n_frames, f);
+    return fclose(f) == 0;
+}
+
+/* Strip whisper special tokens like [BLANK_AUDIO] [MUSIC] etc. */
+static gchar *whisper_strip_specials(const gchar *text)
+{
+    GString *out = g_string_new(NULL);
+    const gchar *p = text;
+    while (*p) {
+        if (*p == '[') {
+            const gchar *end = strchr(p, ']');
+            if (end) { p = end + 1; continue; }
+        }
+        g_string_append_c(out, *p++);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean whisper_insert_cb(gpointer data)
+{
+    gchar *text = data;
+    gchar *stripped = g_strstrip(text);
+    if (*stripped)
+        ctrl_emit_append(stripped);
+    g_free(text);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer whisper_worker_thread(gpointer _)
+{
+    (void)_;
+    while (TRUE) {
+        gchar *wav_path = g_async_queue_pop(wqueue);
+        if (!wav_path) break;   /* NULL sentinel = shutdown */
+
+        const gchar *model = cfg_whisper_model;
+        const gchar *cli   = cfg_whisper_cli
+            ? cfg_whisper_cli : "/usr/local/bin/whisper-cli";
+
+        if (!model || !g_file_test(model, G_FILE_TEST_EXISTS)) {
+            msgwin_status_add("GeanyVosk: whisper model not found: %s",
+                              model ? model : "(none configured)");
+            remove(wav_path);
+            g_free(wav_path);
+            continue;
+        }
+
+        /* g_spawn_sync needs gchar** — cast away const via explicit array */
+        gchar *w_argv[10];
+        gint   w_argc = 0;
+        w_argv[w_argc++] = (gchar *)cli;
+        w_argv[w_argc++] = (gchar *)"--model";
+        w_argv[w_argc++] = (gchar *)model;
+        w_argv[w_argc++] = (gchar *)"--no-timestamps";
+        w_argv[w_argc++] = (gchar *)"--no-prints";
+        w_argv[w_argc++] = (gchar *)"--language";
+        w_argv[w_argc++] = (gchar *)"en";
+        w_argv[w_argc++] = (gchar *)"--file";
+        w_argv[w_argc++] = wav_path;
+        w_argv[w_argc]   = NULL;
+
+        gchar *out = NULL;
+        GError *err = NULL;
+
+        g_spawn_sync(NULL, w_argv, NULL,
+                     G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL,
+                     NULL, NULL, &out, NULL, NULL, &err);
+
+        if (err) {
+            msgwin_status_add("GeanyVosk: whisper-cli error: %s", err->message);
+            g_error_free(err);
+        } else if (out && *out) {
+            gchar *clean = whisper_strip_specials(out);
+            g_free(out);
+            gchar *trimmed = g_strstrip(clean);
+            if (*trimmed)
+                g_idle_add(whisper_insert_cb, g_strdup(trimmed));
+            g_free(clean);
+        } else {
+            g_free(out);
+        }
+
+        remove(wav_path);
+        g_free(wav_path);
+    }
+    return NULL;
+}
+
+/* Called from audio thread when silence threshold reached. */
+static void whisper_flush_audio(void)
+{
+    if (!wbuf_speech || wbuf_len == 0) {
+        wbuf_len = 0; wbuf_speech = FALSE; wsilence = 0;
+        return;
+    }
+    /* Trim trailing silence, keeping a 100ms margin for natural endings */
+    gsize margin = SAMPLE_RATE / 10;
+    gsize trim   = (gsize)wsilence > margin ? (gsize)wsilence - margin : 0;
+    gsize n      = wbuf_len > trim ? wbuf_len - trim : wbuf_len;
+
+    gchar *path = g_strdup_printf("/tmp/geanyvosk_w%d.wav", ++wchunk_id);
+    if (wav_write(path, wbuf, n))
+        g_async_queue_push(wqueue, path);
+    else {
+        msgwin_status_add("GeanyVosk: failed to write whisper WAV: %s", path);
+        g_free(path);
+    }
+
+    wbuf_len = 0; wbuf_speech = FALSE; wsilence = 0;
+}
+
+#endif /* HAVE_VOSK (whisper) */
+
+/* ------------------------------------------------------------------ */
 /* Audio capture state                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -1379,6 +1565,33 @@ static gpointer audio_thread(gpointer data)
         if (dump)
             fwrite(cap->buf, sizeof(gint16), (size_t)frames, dump);
 #endif
+
+#ifdef HAVE_VOSK
+        /* Whisper dictation buffer */
+        if (g_atomic_int_get(&whisper_dictating)) {
+            if (wbuf) {
+                if (is_silent_chunk(cap->buf, (gsize)frames)) {
+                    wsilence += (gint)frames;
+                } else {
+                    wsilence = 0;
+                    wbuf_speech = TRUE;
+                }
+                if (wbuf_len + (gsize)frames <= WHISPER_BUF_FRAMES) {
+                    memcpy(wbuf + wbuf_len, cap->buf,
+                           (gsize)frames * sizeof(gint16));
+                    wbuf_len += (gsize)frames;
+                }
+                /* Flush on silence threshold or buffer full */
+                if (wbuf_speech &&
+                    (wsilence >= WHISPER_SILENCE_FRAMES ||
+                     wbuf_len >= WHISPER_BUF_FRAMES))
+                    whisper_flush_audio();
+            }
+        } else if (wbuf_len > 0) {
+            /* Dictation stopped — discard partial buffer (may contain "stop dictating") */
+            wbuf_len = 0; wbuf_speech = FALSE; wsilence = 0;
+        }
+#endif
     }
 
 #ifdef VOSK_DUMP_PCM
@@ -1460,6 +1673,17 @@ void plugin_init(GeanyData *data)
     }
 #endif
 
+#ifdef HAVE_VOSK
+    /* Whisper dictation — start worker thread if a model is configured */
+    if (cfg_whisper_model) {
+        wbuf    = g_new(gint16, WHISPER_BUF_FRAMES);
+        wqueue  = g_async_queue_new();
+        wthread = g_thread_new("geanyvosk-whisper", whisper_worker_thread, NULL);
+        msgwin_status_add("GeanyVosk: whisper dictation ready (%s)",
+                          cfg_whisper_model);
+    }
+#endif
+
     ac = g_new0(AudioCapture, 1);
     g_mutex_init(&ac->mutex);
     g_cond_init(&ac->cond);
@@ -1503,6 +1727,19 @@ void plugin_cleanup(void)
         g_free(ac);
         ac = NULL;
     }
+
+#ifdef HAVE_VOSK
+    /* Whisper — audio thread is gone, safe to shut down worker */
+    g_atomic_int_set(&whisper_dictating, 0);
+    if (wthread) {
+        g_async_queue_push(wqueue, NULL);   /* NULL sentinel = shutdown */
+        g_thread_join(wthread);
+        wthread = NULL;
+    }
+    if (wqueue) { g_async_queue_unref(wqueue); wqueue = NULL; }
+    g_free(wbuf); wbuf = NULL;
+    wbuf_len = 0; wbuf_speech = FALSE; wsilence = 0;
+#endif
 
 #ifdef HAVE_VOSK
     if (menu_mode) voice_menu_reset_state();

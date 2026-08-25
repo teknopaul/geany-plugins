@@ -22,6 +22,14 @@
  *      "warnings":["Check the timeout","Possible memory leak"]}
  *     (files and warnings are optional)
  *
+ *   Query current plan state (plugin responds with JSON on the same connection):
+ *     {"query":"state"}
+ *   Response: {"plan":"Name","plan_file":"rel/path","progress_file":"/abs/path",
+ *              "phases":[{"index":1,"name":"...","done":true},...],
+ *              "next_phase":2}
+ *     next_phase is the 1-based index of the first pending phase,
+ *     0 if all phases are done, or null if no active plan.
+ *
  * Sidebar interactions:
  *   Left-click on title row       — open the plan file in the editor
  *   Left-click on completed phase — open all review files at their line numbers
@@ -86,6 +94,19 @@ static gint ctx_phase_idx = -1;
 
 /* ------------------------------------------------------------------ */
 /* Minimal JSON helpers (flat objects only, no nesting required)        */
+
+static gchar *json_escape(const gchar *s)
+{
+    GString *out = g_string_new(NULL);
+    for (; *s; s++) {
+        if      (*s == '"')  g_string_append(out, "\\\"");
+        else if (*s == '\\') g_string_append(out, "\\\\");
+        else if (*s == '\n') g_string_append(out, "\\n");
+        else if (*s == '\t') g_string_append(out, "\\t");
+        else                 g_string_append_c(out, *s);
+    }
+    return g_string_free(out, FALSE);
+}
 
 static gchar *json_get_string(const gchar *json, const gchar *key)
 {
@@ -617,6 +638,66 @@ static gchar *plan_file_rel_path(void)
     return g_strdup(current_plan.plan_file);
 }
 
+/* ------------------------------------------------------------------ */
+/* Build query response JSON from current plan state                    */
+
+static gchar *build_state_json(void)
+{
+    GString *s = g_string_new("{");
+
+    if (current_plan.plan_name) {
+        gchar *esc = json_escape(current_plan.plan_name);
+        g_string_append_printf(s, "\"plan\":\"%s\"", esc);
+        g_free(esc);
+    } else {
+        g_string_append(s, "\"plan\":null");
+    }
+
+    if (current_plan.plan_file) {
+        gchar *rel = plan_file_rel_path();
+        gchar *esc = json_escape(rel ? rel : current_plan.plan_file);
+        g_string_append_printf(s, ",\"plan_file\":\"%s\"", esc);
+        g_free(esc);
+        g_free(rel);
+    } else {
+        g_string_append(s, ",\"plan_file\":null");
+    }
+
+    if (current_plan.progress_file) {
+        gchar *esc = json_escape(current_plan.progress_file);
+        g_string_append_printf(s, ",\"progress_file\":\"%s\"", esc);
+        g_free(esc);
+    } else {
+        g_string_append(s, ",\"progress_file\":null");
+    }
+
+    g_string_append(s, ",\"phases\":[");
+    for (gint i = 0; i < current_plan.n_phases; i++) {
+        Phase *ph  = &current_plan.phases[i];
+        gchar *esc = json_escape(ph->name);
+        if (i > 0) g_string_append_c(s, ',');
+        g_string_append_printf(s,
+            "{\"index\":%d,\"name\":\"%s\",\"done\":%s}",
+            i + 1, esc, ph->done ? "true" : "false");
+        g_free(esc);
+    }
+    g_string_append(s, "]");
+
+    /* next_phase: first pending phase (1-based); 0 = all done; null = no plan */
+    if (current_plan.plan_name && current_plan.n_phases > 0) {
+        gint next = 0;
+        for (gint i = 0; i < current_plan.n_phases; i++) {
+            if (!current_plan.phases[i].done) { next = i + 1; break; }
+        }
+        g_string_append_printf(s, ",\"next_phase\":%d", next);
+    } else {
+        g_string_append(s, ",\"next_phase\":null");
+    }
+
+    g_string_append(s, "}\n");
+    return g_string_free(s, FALSE);
+}
+
 static void emit_insert_to_agent(const gchar *text)
 {
     GType obj_type = G_OBJECT_TYPE(geany->object);
@@ -961,7 +1042,16 @@ static gboolean on_incoming_connection(G_GNUC_UNUSED GSocketService *service,
     gssize n = g_input_stream_read(in, buf, sizeof(buf) - 1, NULL, NULL);
     if (n > 0) {
         buf[n] = '\0';
-        handle_message(buf);
+        if (strstr(buf, "\"query\"")) {
+            gchar         *json = build_state_json();
+            GOutputStream *out  = g_io_stream_get_output_stream(G_IO_STREAM(connection));
+            g_output_stream_write_all(out, json, strlen(json), NULL, NULL, NULL);
+            g_output_stream_flush(out, NULL, NULL);
+            g_free(json);
+            g_io_stream_close(G_IO_STREAM(connection), NULL, NULL);
+        } else {
+            handle_message(buf);
+        }
     }
     return TRUE;
 }
@@ -1135,8 +1225,9 @@ G_MODULE_EXPORT void geany_load_module(GeanyPlugin *plugin)
         "Done: {\"phase\":N,\"status\":\"complete\","
               "\"files\":[{\"path\":\"f\",\"line\":N}],"
               "\"warnings\":[\"msg\"]}. "
+        "Query: {\"query\":\"state\"} — responds with plan+progress JSON. "
         "Naming: .planning/plans/xxxx_PLAN.md / .planning/state/xxxx_PROGRESS.md";
-    plugin->info->version     = "0.3";
+    plugin->info->version     = "0.4";
     plugin->info->author      = "teknopaul";
 
     plugin->funcs->init    = gp_init;
