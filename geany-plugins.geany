@@ -28,11 +28,8 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=2
-FILE_NAME_0=185;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeneral-features-todo.md;0;4
-FILE_NAME_1=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeanyprogress-extensions.prompt.md;0;4
-FILE_NAME_2=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2F.planning%2Fplans%2Fagent-stop-focus_PLAN.md;0;4
-FILE_NAME_3=0;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2F.planning%2Fstate%2FAGENT_STOP_FOCUS_PROGRESS.md;0;4
+current_page=0
+FILE_NAME_0=190;Markdown;0;EUTF-8;1;1;0;%2Fhome%2Fteknopaul%2Fgithub_workspace%2Fgeany-plugins%2Fai-prompts%2Fgeneral-features-todo.md;0;4
 
 [VTE]
 last_dir=/home/teknopaul

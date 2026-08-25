@@ -990,7 +990,7 @@ static gboolean gc_init(GeanyPlugin *plugin,
         GList *children = gtk_container_get_children(GTK_CONTAINER(file_menu));
         gint pos = g_list_index(children, quit_item);
         g_list_free(children);
-        file_item = gtk_menu_item_new_with_label(_("New Window"));
+        file_item = gtk_menu_item_new_with_label(_("New Instance"));
         gtk_widget_show(file_item);
         gtk_menu_shell_insert(GTK_MENU_SHELL(file_menu), file_item, pos);
         g_signal_connect(file_item, "activate", G_CALLBACK(on_new_instance_activate), NULL);
