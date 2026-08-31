@@ -47,9 +47,10 @@ static gchar *config_file  = NULL;
 static gchar *search_url   = NULL;
 
 typedef struct {
-    gchar *key;   /* config group key */
-    gchar *name;  /* display name */
-    gchar *cmd;   /* shell command */
+    gchar *key;      /* config group key */
+    gchar *name;     /* display name */
+    gchar *cmd;      /* shell command */
+    gchar *work_dir; /* optional working directory template */
 } AgentConfig;
 
 static GPtrArray *agents       = NULL;
@@ -197,6 +198,7 @@ static void agent_config_free(AgentConfig *ac)
     g_free(ac->key);
     g_free(ac->name);
     g_free(ac->cmd);
+    g_free(ac->work_dir);
     g_free(ac);
 }
 
@@ -335,6 +337,10 @@ static void ga_run_agent_cmd(const gchar *expanded)
 /* ------------------------------------------------------------------ */
 /* Agent tools config                                                  */
 
+/* Expand %p %d %f %e %l %r %F in tmpl using filepath.
+ * %p = absolute path, %d = directory, %f = filename, %e = stem (no ext),
+ * %l = current line, %r = project root, %F = path relative to root.
+ * Caller frees result. */
 static gchar *agent_tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 {
 	GString     *out  = g_string_sized_new(256);
@@ -348,6 +354,20 @@ static gchar *agent_tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 	else
 		root = g_strdup(g_get_home_dir());
 
+	const gchar *first_dot = strchr(base, '.');
+	gchar *stem = first_dot ? g_strndup(base, (gsize)(first_dot - base))
+	                        : g_strdup(base);
+
+	gint line = 1;
+	GeanyDocument *doc = document_get_current();
+	if (doc && doc->file_name && strcmp(doc->file_name, filepath) == 0)
+		line = sci_get_current_line(doc->editor->sci) + 1;
+
+	const gchar *rel = filepath;
+	gsize root_len = strlen(root);
+	if (g_str_has_prefix(filepath, root) && filepath[root_len] == '/')
+		rel = filepath + root_len + 1;
+
 	for (const gchar *p = tmpl; *p; p++) {
 		if (*p != '%' || !*(p + 1)) {
 			g_string_append_c(out, *p);
@@ -355,11 +375,14 @@ static gchar *agent_tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 		}
 		p++;
 		switch (*p) {
-			case 'p': g_string_append(out, filepath); break;
-			case 'd': g_string_append(out, dir);      break;
-			case 'f': g_string_append(out, base);     break;
-			case 'r': g_string_append(out, root);     break;
-			case '%': g_string_append_c(out, '%');    break;
+			case 'p': g_string_append(out, filepath);          break;
+			case 'd': g_string_append(out, dir);               break;
+			case 'f': g_string_append(out, base);              break;
+			case 'e': g_string_append(out, stem);              break;
+			case 'l': g_string_append_printf(out, "%d", line); break;
+			case 'r': g_string_append(out, root);              break;
+			case 'F': g_string_append(out, rel);               break;
+			case '%': g_string_append_c(out, '%');             break;
 			default:
 				g_string_append_c(out, '%');
 				g_string_append_c(out, *p);
@@ -368,6 +391,7 @@ static gchar *agent_tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 	g_free(root);
 	g_free(dir);
 	g_free(base);
+	g_free(stem);
 	return g_string_free(out, FALSE);
 }
 
@@ -625,13 +649,24 @@ static void ga_spawn(void)
 	argv[n + 1] = (ac && ac->cmd) ? ac->cmd : (gchar *)DEFAULT_CMD;
 	argv[n + 2] = NULL;
 
-	/* prefer project base path; fall back to home dir */
+	/* Resolve working directory: configured template > project base > home */
 	gchar *work_dir = NULL;
-	GeanyApp *app = geany->app;
-	if (app->project && app->project->base_path && *app->project->base_path)
-		work_dir = g_strdup(app->project->base_path);
-	else
-		work_dir = g_strdup(g_get_home_dir());
+	if (ac && ac->work_dir && *ac->work_dir) {
+		GeanyDocument *doc = document_get_current();
+		const gchar *filepath = (doc && doc->file_name) ? doc->file_name : "";
+		work_dir = agent_tools_format_cmd(ac->work_dir, filepath);
+		if (!g_file_test(work_dir, G_FILE_TEST_IS_DIR)) {
+			g_free(work_dir);
+			work_dir = NULL;
+		}
+	}
+	if (!work_dir) {
+		GeanyApp *app = geany->app;
+		if (app->project && app->project->base_path && *app->project->base_path)
+			work_dir = g_strdup(app->project->base_path);
+		else
+			work_dir = g_strdup(g_get_home_dir());
+	}
 
 	/* Build PATH: prepend askpass_dir so our sudo wrapper takes priority */
 	const gchar *old_path = g_getenv("PATH");
@@ -1328,9 +1363,10 @@ static void ga_load_config(void)
 				if (g_key_file_has_group(kf, group))
 				{
 					AgentConfig *ac = g_new0(AgentConfig, 1);
-					ac->key  = g_strdup(key);
-					ac->name = g_key_file_get_string(kf, group, "name", NULL);
-					ac->cmd  = g_key_file_get_string(kf, group, "cmd", NULL);
+					ac->key      = g_strdup(key);
+					ac->name     = g_key_file_get_string(kf, group, "name", NULL);
+					ac->cmd      = g_key_file_get_string(kf, group, "cmd", NULL);
+					ac->work_dir = g_key_file_get_string(kf, group, "work_dir", NULL);
 					if (!ac->name)
 						ac->name = g_strdup(key);
 					g_ptr_array_add(agents, ac);
@@ -1434,6 +1470,8 @@ static void ga_save_config(void)
 		gchar *group = g_strdup_printf("agent:%s", ac->key);
 		g_key_file_set_string(kf, group, "name", ac->name);
 		g_key_file_set_string(kf, group, "cmd",  ac->cmd);
+		if (ac->work_dir && *ac->work_dir)
+			g_key_file_set_string(kf, group, "work_dir", ac->work_dir);
 		g_free(group);
 	}
 
@@ -1515,6 +1553,7 @@ typedef struct {
 	GtkWidget *agent_combo;
 	GtkWidget *name_entry;
 	GtkWidget *cmd_entry;
+	GtkWidget *work_dir_entry;
 	GtkWidget *askpass_check;
 	GtkWidget *focus_check;
 	GtkWidget *search_url_entry;
@@ -1526,8 +1565,9 @@ static void on_agent_combo_changed(GtkComboBox *combo, ConfigWidgets *cw)
 	if (idx < 0 || idx >= (gint)agents->len)
 		return;
 	AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, idx);
-	gtk_entry_set_text(GTK_ENTRY(cw->name_entry), ac->name ? ac->name : "");
-	gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),  ac->cmd  ? ac->cmd  : "");
+	gtk_entry_set_text(GTK_ENTRY(cw->name_entry),     ac->name     ? ac->name     : "");
+	gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),      ac->cmd      ? ac->cmd      : "");
+	gtk_entry_set_text(GTK_ENTRY(cw->work_dir_entry), ac->work_dir ? ac->work_dir : "");
 }
 
 static void on_agent_add_clicked(G_GNUC_UNUSED GtkButton *btn, ConfigWidgets *cw)
@@ -1582,9 +1622,12 @@ static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
 		{
 			AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, idx);
 			g_free(ac->name);
-			ac->name   = g_strdup(gtk_entry_get_text(GTK_ENTRY(cw->name_entry)));
+			ac->name = g_strdup(gtk_entry_get_text(GTK_ENTRY(cw->name_entry)));
 			g_free(ac->cmd);
-			ac->cmd    = g_strdup(gtk_entry_get_text(GTK_ENTRY(cw->cmd_entry)));
+			ac->cmd  = g_strdup(gtk_entry_get_text(GTK_ENTRY(cw->cmd_entry)));
+			g_free(ac->work_dir);
+			const gchar *wd = gtk_entry_get_text(GTK_ENTRY(cw->work_dir_entry));
+			ac->work_dir = (wd && *wd) ? g_strdup(wd) : NULL;
 			active_agent = idx;
 		}
 		use_askpass = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cw->askpass_check));
@@ -1634,11 +1677,24 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	gtk_widget_set_halign(cmd_label, GTK_ALIGN_START);
 	cw->cmd_entry = gtk_entry_new();
 
+	GtkWidget *work_dir_label = gtk_label_new(_("Working directory (empty = project root):"));
+	gtk_widget_set_halign(work_dir_label, GTK_ALIGN_START);
+	cw->work_dir_entry = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(cw->work_dir_entry), "%r");
+	gtk_widget_set_tooltip_text(cw->work_dir_entry,
+	    "Optional working directory for the agent process.\n"
+	    "Supports the same replacements as filetypetools.conf:\n"
+	    "  %r = project root   %d = current file's directory\n"
+	    "  %p = current file (absolute)   %f = filename\n"
+	    "  %e = stem (no extension)   %F = file relative to root\n"
+	    "Leave empty to use the project root (or $HOME if no project is open).");
+
 	/* Load current agent's values */
 	{
 		AgentConfig *ac = (AgentConfig *)g_ptr_array_index(agents, active_agent);
-		gtk_entry_set_text(GTK_ENTRY(cw->name_entry), ac->name ? ac->name : "");
-		gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),  ac->cmd  ? ac->cmd  : "");
+		gtk_entry_set_text(GTK_ENTRY(cw->name_entry),     ac->name     ? ac->name     : "");
+		gtk_entry_set_text(GTK_ENTRY(cw->cmd_entry),      ac->cmd      ? ac->cmd      : "");
+		gtk_entry_set_text(GTK_ENTRY(cw->work_dir_entry), ac->work_dir ? ac->work_dir : "");
 	}
 
 	cw->askpass_check = gtk_check_button_new_with_label(
@@ -1675,10 +1731,12 @@ static GtkWidget *ga_configure(G_GNUC_UNUSED GeanyPlugin *plugin,
 	gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""), FALSE, FALSE, 2);
 	gtk_box_pack_start(GTK_BOX(vbox), name_label,        FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), cw->name_entry,    FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), cmd_label,         FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,     FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""), FALSE, FALSE, 2);
-	gtk_box_pack_start(GTK_BOX(vbox), cw->askpass_check,   FALSE, FALSE, 4);
+	gtk_box_pack_start(GTK_BOX(vbox), cmd_label,          FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->cmd_entry,      FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), work_dir_label,     FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->work_dir_entry, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""),  FALSE, FALSE, 2);
+	gtk_box_pack_start(GTK_BOX(vbox), cw->askpass_check,  FALSE, FALSE, 4);
 	gtk_box_pack_start(GTK_BOX(vbox), cw->focus_check,     FALSE, FALSE, 4);
 	gtk_box_pack_start(GTK_BOX(vbox), search_url_label,    FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), cw->search_url_entry, FALSE, FALSE, 0);
