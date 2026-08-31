@@ -646,14 +646,17 @@ static void ga_spawn(void)
 	AgentConfig *ac = agents && active_agent < (gint)agents->len
 	                ? (AgentConfig *)g_ptr_array_index(agents, active_agent)
 	                : NULL;
-	argv[n + 1] = (ac && ac->cmd) ? ac->cmd : (gchar *)DEFAULT_CMD;
-	argv[n + 2] = NULL;
 
 	/* Resolve working directory: configured template > project base > home */
+	GeanyDocument *doc_for_spawn = document_get_current();
+	const gchar *filepath = (doc_for_spawn && doc_for_spawn->file_name) ? doc_for_spawn->file_name : "";
+	const gchar *raw_cmd = (ac && ac->cmd) ? ac->cmd : DEFAULT_CMD;
+	gchar *expanded_cmd = agent_tools_format_cmd(raw_cmd, filepath);
+	argv[n + 1] = expanded_cmd;
+	argv[n + 2] = NULL;
+
 	gchar *work_dir = NULL;
 	if (ac && ac->work_dir && *ac->work_dir) {
-		GeanyDocument *doc = document_get_current();
-		const gchar *filepath = (doc && doc->file_name) ? doc->file_name : "";
 		work_dir = agent_tools_format_cmd(ac->work_dir, filepath);
 		if (!g_file_test(work_dir, G_FILE_TEST_IS_DIR)) {
 			g_free(work_dir);
@@ -703,6 +706,7 @@ static void ga_spawn(void)
 	                         NULL);
 
 	g_strfreev(env);
+	g_free(expanded_cmd);
 	g_free(work_dir);
 	g_free(argv);
 	g_strfreev(shell_parts);
