@@ -344,15 +344,17 @@ static void ga_run_agent_cmd(const gchar *expanded)
 static gchar *agent_tools_format_cmd(const gchar *tmpl, const gchar *filepath)
 {
 	GString     *out  = g_string_sized_new(256);
-	gchar       *dir  = g_path_get_dirname(filepath);
-	gchar       *base = g_path_get_basename(filepath);
-	gchar       *root;
 	GeanyApp    *app  = geany->app;
+	gchar       *root;
 
 	if (app->project && app->project->base_path && *app->project->base_path)
 		root = g_strdup(app->project->base_path);
 	else
 		root = g_strdup(g_get_home_dir());
+
+	/* When no file is open, %d falls back to project root rather than "." */
+	gchar *dir  = (*filepath) ? g_path_get_dirname(filepath) : g_strdup(root);
+	gchar *base = g_path_get_basename(filepath);
 
 	const gchar *first_dot = strchr(base, '.');
 	gchar *stem = first_dot ? g_strndup(base, (gsize)(first_dot - base))
@@ -1642,6 +1644,7 @@ static void on_configure_response(G_GNUC_UNUSED GtkDialog *dialog,
 		search_url  = g_strdup(new_url && *new_url ? new_url : DEFAULT_SEARCH_URL);
 		update_agent_label();
 		ga_save_config();
+		ga_restart();
 	}
 	g_free(cw);
 }
