@@ -2132,6 +2132,64 @@ on_filter_clear(GtkEntry *entry, gint icon_pos, GdkEvent *event, gpointer data)
 static gboolean
 on_treeview_mouseclick(GtkWidget *widget, GdkEventButton *event, GtkTreeSelection *selection)
 {
+	if (event->button == 1 && (event->state & GDK_MOD1_MASK))
+	{
+		GtkTreeIter iter;
+		GtkTreeModel *model;
+		GtkTreePath *path;
+		gchar *uri = NULL;
+
+		if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(treeview),
+		                                   (gint) event->x,
+		                                   (gint) event->y,
+		                                   &path, NULL, NULL, NULL))
+		{
+			gtk_tree_selection_unselect_all(selection);
+			gtk_tree_selection_select_path(selection, path);
+			gtk_tree_path_free(path);
+		}
+
+		if (gtk_tree_selection_get_selected(selection, &model, &iter))
+			gtk_tree_model_get(GTK_TREE_MODEL(treestore), &iter,
+			                   TREEBROWSER_COLUMN_URI, &uri, -1);
+
+		if (uri)
+		{
+			on_menu_copy_uri(NULL, uri);
+			g_free(uri);
+		}
+		return TRUE;
+	}
+
+	if (event->button == 1 && (event->state & GDK_CONTROL_MASK))
+	{
+		GtkTreeIter iter;
+		GtkTreeModel *model;
+		GtkTreePath *path;
+		gchar *uri = NULL;
+
+		if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(treeview),
+		                                   (gint) event->x,
+		                                   (gint) event->y,
+		                                   &path, NULL, NULL, NULL))
+		{
+			gtk_tree_selection_unselect_all(selection);
+			gtk_tree_selection_select_path(selection, path);
+			gtk_tree_path_free(path);
+		}
+
+		if (gtk_tree_selection_get_selected(selection, &model, &iter))
+			gtk_tree_model_get(GTK_TREE_MODEL(treestore), &iter,
+			                   TREEBROWSER_COLUMN_URI, &uri, -1);
+
+		if (uri)
+		{
+			on_menu_copy_relative_uri(NULL, uri);
+			g_free(uri);
+		}
+		return TRUE;
+	}
+
 	if (event->button == 3)
 	{
 		GtkTreeIter 	iter;
